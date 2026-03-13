@@ -6,9 +6,9 @@ import datetime
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
 # 视频相关参数
-parser.add_argument('--video_path', type=str, default="workspace/0227.mp4")  # 输入视频路径
-parser.add_argument('--video_step_size', default=10, type=int)  # 帧提取间隔（每隔N帧取一帧）
-parser.add_argument('--video_ds_ratio', default=0.5, type=float)  # 视频下采样比例
+parser.add_argument('--video_path', type=str)  # 输入视频路径
+parser.add_argument('--video_step_size', default=1, type=int)  # 帧提取间隔（每隔N帧取一帧）
+parser.add_argument('--video_ds_ratio', default=1.0, type=float)  # 视频下采样比例
 
 # 配准相关参数
 parser.add_argument('--reg_close_eye', type=int, default=0)  # 是否使用闭眼模板（0=睁眼, 1=闭眼）
@@ -26,7 +26,7 @@ opt.save_root = os.path.abspath(opt.save_root)
 os.makedirs(opt.save_root, exist_ok=True)
 # 生成日志文件名（带时间戳）
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-log_path = os.path.join(opt.save_root, f"log_{timestamp}.txt")
+log_path = os.path.join(opt.save_root, f"log.txt")
 
 
 # 写入日志（同时输出到控制台和文件）

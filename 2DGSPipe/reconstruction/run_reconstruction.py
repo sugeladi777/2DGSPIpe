@@ -34,9 +34,10 @@ if True:
     os.chdir(gs_code_root)
 
     recon_root = os.path.join(opt.data_root, "recon")
+    port = os.environ.get("RECON_PORT", "6009")
     os.system(
-        "python train.py -s %s -m %s" % (
-            opt.data_root, recon_root,
+        "python train.py -s %s -m %s --port %s" % (
+            opt.data_root, recon_root, port
         )
     )
 

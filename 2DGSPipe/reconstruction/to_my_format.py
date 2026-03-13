@@ -10,7 +10,7 @@ parser.add_argument('--data_root', type=str, default="xxx")
 opt = parser.parse_args()
 
 
-mesh_path = os.path.join(opt.data_root, "recon/train/ours_30000/fuse_post.ply")
+mesh_path = os.path.join(opt.data_root, "recon/train/ours_15000/fuse_post.ply")
 mesh = trimesh.load(mesh_path)
 split_all = mesh.split(only_watertight=False)
 mesh = sorted(split_all, key=lambda x: len(x.faces))[-1]
