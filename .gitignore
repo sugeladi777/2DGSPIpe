@@ -1,16 +1,10 @@
 input/*
 output/*
 doc/*
-2DGSPipe/reconstruction/2d-gaussian-splatting/*
-2DGSPipe/registration/align
-2DGSPipe/registration/assets
-2DGSPipe/registration/eyelid_detector
-2DGSPipe/registration/face_alignment
-2DGSPipe/registration/face_detection
-2DGSPipe/registration/pretrained
-2DGSPipe/registration/utils
-2DGSPipe/registration/wrap
 2DGSPipe/matting/model
+2DGSPipe/reconstruction/2d-gaussian-splatting/submodules/
+2DGSPipe/reconstruction/2d-gaussian-splatting/assets/
+2DGSPipe/reconstruction/2d-gaussian-splatting/**/__pycache__/
 
 # Python 缓存与临时文件
 __pycache__/
