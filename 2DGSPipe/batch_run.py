@@ -3,7 +3,7 @@ import subprocess
 from multiprocessing import Pool
 
 input_dir = "/home/lichengkai/RGB_Recon/input/mini_test"  # 视频文件夹路径
-output_root = "/home/lichengkai/RGB_Recon/output/2026.3.16/mini_test"      # 保存结果的根目录
+output_root = "/home/lichengkai/RGB_Recon/output/2026.3.16/mini_test_add_loss_weight3"      # 保存结果的根目录
 gpus = ["0"]
 base_port = 6009
 

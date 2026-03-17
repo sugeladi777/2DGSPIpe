@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 
 # 视频相关参数
 parser.add_argument('--video_path', type=str)  # 输入视频路径
-parser.add_argument('--video_step_size', default=5, type=int)  # 帧提取间隔（每隔N帧取一帧）
+parser.add_argument('--video_step_size', default=10, type=int)  # 帧提取间隔（每隔N帧取一帧）
 parser.add_argument('--video_ds_ratio', default=1.0, type=float)  # 视频下采样比例
 
 # 配准相关参数
@@ -15,7 +15,7 @@ parser.add_argument('--reg_close_eye', type=int, default=0)  # 是否使用闭�
 
 # 输出路径和选择执行的功能模块
 parser.add_argument('--save_root', type=str)  # 结果保存根目录
-parser.add_argument('--func', type=str, default="extract-mat-recon-refine-uv-tex")  # 执行的功能模块列表
+parser.add_argument('--func', type=str, default="extract-mat-face-recon-refine")  # 执行的功能模块列表
 
 
 opt, _ = parser.parse_known_args()
@@ -46,15 +46,16 @@ write_log("-" * 30)
 # 获取各模块代码路径
 code_root = os.path.dirname(os.path.abspath(__file__))
 mat_code_root = os.path.join(code_root, "matting")  # 前景分割模块
+face_code_root = os.path.join(code_root, "mask")  # 人脸检测模块
 recon_code_root = os.path.join(code_root, "reconstruction")  # 重建模块
 refine_code_root = os.path.join(code_root, "refinement")  # 精细化模块
-# reg_code_root = os.path.join(code_root, "registration")  # 配准模块
 uv_code_root = os.path.join(code_root, "uvexport")  # UV导出模块
 tex_code_root = os.path.join(code_root, "texture")  # 纹理模块
 
 # 设置子目录路径
 raw_frame_root = os.path.join(opt.save_root, "raw_frames")  # 原始帧保存路径
 mask_save_root = os.path.join(opt.save_root, "mask")  # 掩码保存路径
+face_mask_save_root = os.path.join(opt.save_root, "face_mask")  # 人脸掩码保存路径
 
 
 # ========== 帧提取模块 ==========
@@ -82,6 +83,16 @@ if "mat" in opt.func:
     m_end = datetime.datetime.now()
     write_log(f"[Module: mat] runtime: {m_end - m_start}")
 
+# ========== 人脸检测模块（Face Detection） ==========
+if "face" in opt.func:
+    m_start = datetime.datetime.now()
+    os.chdir(face_code_root)
+    os.system("python run_face_detection.py --input_root %s --output_root %s" % (raw_frame_root, face_mask_save_root))
+    os.chdir(code_root)
+    
+    m_end = datetime.datetime.now()
+    write_log(f"[Module: face] runtime: {m_end - m_start}")
+
 # ========== 重建模块（2D Gaussian Splatting） ==========
 if "recon" in opt.func:
     m_start = datetime.datetime.now()
@@ -101,16 +112,6 @@ if "refine" in opt.func:
     
     m_end = datetime.datetime.now()
     write_log(f"[Module: refine] runtime: {m_end - m_start}")
-
-# # ========== 配准模块（与模板对齐） ==========
-# if "reg" in opt.func:
-#     m_start = datetime.datetime.now()
-#     os.chdir(reg_code_root)
-#     os.system("python run_registration.py --data_root %s --close_eye %d" % (opt.save_root, opt.reg_close_eye))
-#     os.chdir(code_root)
-    
-#     m_end = datetime.datetime.now()
-#     write_log(f"[Module: reg] runtime: {m_end - m_start}")
 
 # ========== UV导出模块 ==========
 if "uv" in opt.func:
