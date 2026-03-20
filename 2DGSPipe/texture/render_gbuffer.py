@@ -173,11 +173,6 @@ class DiffusionSampler:
         os.makedirs(self.save_mask_root, exist_ok=True)
         os.makedirs(self.save_pho_mask_root, exist_ok=True)
 
-        self.narrow_mask = 1 - self._load_img("assets/narrow_mask.png")
-    
-    def _load_img(self, pth):
-        return transforms.ToTensor()(Image.open(pth))[None, :3, ...].to(self.device)
-
     def _load_geometry(self, mesh_uv_path):
         device = self.device
         mesh = trimesh.load_mesh(mesh_uv_path)
@@ -265,9 +260,8 @@ class DiffusionSampler:
             save_image(uv_img_vis, os.path.join(self.save_vis_root, "%s.jpg" % img_name))
             torch.save(uv_img, os.path.join(self.save_root, "%s.pkl" % img_name))
 
-            narrow_mask = F.grid_sample(self.narrow_mask, uv_img.permute(0, 2, 3, 1))
-            narrow_mask = narrow_mask * mask_img
-            save_image(narrow_mask, os.path.join(self.save_pho_mask_root, "%s.png" % img_name))
+            # pho_mask is just mask_img for full UV unwrapped model
+            save_image(mask_img, os.path.join(self.save_pho_mask_root, "%s.png" % img_name))
 
 
 if __name__ == "__main__":

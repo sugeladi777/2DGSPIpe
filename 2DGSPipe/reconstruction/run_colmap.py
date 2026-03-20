@@ -9,7 +9,7 @@ data_root = args.data_root
 
 
 img_root = os.path.join(data_root, "images")
-mask_root = os.path.join(data_root, "mask")
+mask_root = os.path.join(data_root, "wholebody_mask")
 database_root = os.path.join(data_root, "database.db")
 sparse_root = os.path.join(data_root, "sparse")
 recon_root = os.path.join(sparse_root, "0")

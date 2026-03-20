@@ -12,7 +12,7 @@ parser.add_argument('--data_root', type=str, default="xxx")
 opt = parser.parse_args()
 
 img_root = os.path.join(opt.data_root, "raw_frames")
-mask_root = os.path.join(opt.data_root, "mask")
+mask_root = os.path.join(opt.data_root, "face_mask")
 save_root = os.path.join(opt.data_root, "images")
 os.makedirs(save_root, exist_ok=True)
 

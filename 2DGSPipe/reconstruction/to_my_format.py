@@ -12,9 +12,9 @@ opt = parser.parse_args()
 
 mesh_path = os.path.join(opt.data_root, "recon/train/ours_15000/fuse_post.ply")
 mesh = trimesh.load(mesh_path)
-split_all = mesh.split(only_watertight=False)
-mesh = sorted(split_all, key=lambda x: len(x.faces))[-1]
-mesh.export(os.path.join(opt.data_root, "2dgs_recon.obj"))
+
+os.makedirs(os.path.join(opt.data_root, "mesh"), exist_ok=True)
+mesh.export(os.path.join(opt.data_root, "mesh", "2dgs_recon.obj"))
 
 cam_path = os.path.join(opt.data_root, "recon/cameras.json")
 
@@ -46,5 +46,5 @@ for cam_info in cam_info_list:
     frames.append(cur_frame)
 
 save_info["frames"] = frames
-with open(os.path.join(opt.data_root, "transforms.json"), 'w') as f:
+with open(os.path.join(opt.data_root, "mesh", "transforms.json"), 'w') as f:
     json.dump(save_info, f, indent=4)

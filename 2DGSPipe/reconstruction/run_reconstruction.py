@@ -42,7 +42,7 @@ if True:
     )
 
     os.system(
-        "python render.py -s %s -m %s --mesh_res 1024" % (
+        "python render.py -s %s -m %s" % (
             opt.data_root, recon_root,
         )
     )

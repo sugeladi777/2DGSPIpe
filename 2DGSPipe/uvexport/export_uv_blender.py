@@ -38,7 +38,6 @@ def export_uv(in_mesh_fpath, out_mesh_fpath):
     
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
-    # bpy.ops.uv.unwrap()
     bpy.ops.uv.smart_project()
     bpy.ops.object.mode_set(mode="OBJECT")
 
