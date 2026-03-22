@@ -2,9 +2,9 @@ import os
 import subprocess
 from multiprocessing import Pool
 
-input_dir = "/home/lichengkai/RGB_Recon/input/mini_test"  # 视频文件夹路径
-output_root = "/home/lichengkai/RGB_Recon/output/2026.3.20/mini_test"      # 保存结果的根目录
-gpus = ["0、1"]
+input_dir = "/home/lichengkai/RGB_Recon/input/test"  # 视频文件夹路径
+output_root = "/home/lichengkai/RGB_Recon/output/2026.3.20/test_only_face"      # 保存结果的根目录
+gpus = ["0", "1"]
 base_port = 6009
 
 # 获取所有视频文件
