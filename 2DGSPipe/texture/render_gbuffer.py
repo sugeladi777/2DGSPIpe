@@ -4,18 +4,12 @@ import numpy as np
 import trimesh
 from tqdm import tqdm
 import json
-import yaml
-import math
 from PIL import Image
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from torchvision import transforms
 from torchvision.utils import save_image
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-import kornia
-from scipy.spatial.transform import Rotation
 
 from mesh_renderer import MeshRenderer
 
@@ -23,8 +17,8 @@ from mesh_renderer import MeshRenderer
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--device', type=str, default="0")
 parser.add_argument('--syn', type=int, default=1)
-parser.add_argument('--data_root', type=str, default="xxx")
-opt, _ = parser.parse_known_args()
+parser.add_argument('--data_root', type=str, required=True)
+opt = parser.parse_args()
 
 opt.meta_file_path = os.path.join(opt.data_root, "transforms.json")
 
@@ -163,6 +157,12 @@ class DiffusionSampler:
 
         self.HEIGHT = train_data.HEIGHT
         self.WIDTH = train_data.WIDTH
+        x, y = torch.meshgrid(
+            torch.arange(self.WIDTH, device=self.device),
+            torch.arange(self.HEIGHT, device=self.device),
+        )
+        self.pixel_x = x.transpose(0, 1).flatten()
+        self.pixel_y = y.transpose(0, 1).flatten()
         data_root = opt.data_root
         self.save_root = os.path.join(data_root, "uv")
         self.save_vis_root = os.path.join(data_root, "uv_vis")
@@ -197,21 +197,11 @@ class DiffusionSampler:
         width = self.WIDTH
         device = self.device
 
-        x, y = torch.meshgrid(
-            torch.arange(width),
-            torch.arange(height),
-        )
-        # for pytorch 1.9 cannot specify indexing="xy"
-        x = x.transpose(0, 1)
-        y = y.transpose(0, 1)
-        
-        x = x.flatten().to(device)
-        y = y.flatten().to(device)
         camera_dirs = torch.stack(
             [
-                (x - intrinsic[0, 2] + 0.5) / intrinsic[0, 0],
-                (y - intrinsic[1, 2] + 0.5) / intrinsic[1, 1],
-                torch.ones_like(y),
+                (self.pixel_x - intrinsic[0, 2] + 0.5) / intrinsic[0, 0],
+                (self.pixel_y - intrinsic[1, 2] + 0.5) / intrinsic[1, 1],
+                torch.ones_like(self.pixel_y, device=device),
             ],
             dim=-1,
         )  # [num_rays,3]

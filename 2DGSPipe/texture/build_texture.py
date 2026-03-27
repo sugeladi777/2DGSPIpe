@@ -7,9 +7,9 @@ parser.add_argument('--img_name', type=str, default="image")
 parser.add_argument('--num_view', type=int, default=16)
 parser.add_argument('--syn', type=int, default=1)
 parser.add_argument('--vis_freq', type=int, default=50)
-parser.add_argument('--data_root', type=str, default="xxx")
+parser.add_argument('--data_root', type=str, required=True)
 
-opt, _ = parser.parse_known_args()
+opt = parser.parse_args()
 
 opt.meta_file_path = os.path.join(opt.data_root, "transforms.json")
 
@@ -75,22 +75,24 @@ class UVInstantNGP(nn.Module):
         self.diff_uv_net = InstantNGPNetwork(
             finest_level=finest_level, log2_hashmap_size=log2_hashmap_size, out_chns=3,
         )
+        self.register_buffer("uv_coord", self._build_uv_coord(), persistent=False)
+
+    def _build_uv_coord(self):
+        x, y = torch.meshgrid(
+            torch.arange(self.width, dtype=torch.float32),
+            torch.arange(self.height, dtype=torch.float32),
+            indexing="xy",
+        )
+        x = x.flatten() / self.width
+        y = y.flatten() / self.height
+        return torch.stack([x, y], dim=1)
     
     def _batch_forward(self, net):
         batch_size = self.cfg["batch_size"]
-        x, y = torch.meshgrid(
-            torch.arange(self.width),
-            torch.arange(self.height),
-            indexing="xy",
-        )
-        x = x.flatten().cuda() / self.width
-        y = y.flatten().cuda() / self.height
-        coord = torch.stack([x, y], dim=1)
-        start = 0
         res_list = []
-        cnt = 0
-        while start < len(coord):
-            cnt += 1
+        coord = self.uv_coord
+        start = 0
+        while start < coord.shape[0]:
             end = start + batch_size
             cur_coord = coord[start:end]
             cur_res = net(cur_coord)
@@ -243,6 +245,12 @@ class DiffusionSampler:
         self.HEIGHT = train_data.HEIGHT  # image height
         self.WIDTH = train_data.WIDTH  # image width
         self.weight_loss_tau = 100
+        x, y = torch.meshgrid(
+            torch.arange(self.WIDTH, device=self.device),
+            torch.arange(self.HEIGHT, device=self.device),
+        )
+        self.pixel_x = x.transpose(0, 1).flatten()
+        self.pixel_y = y.transpose(0, 1).flatten()
 
         self.uv_reso_h = net_cfg["uv_reso_h"]
         self.uv_reso_w = net_cfg["uv_reso_w"]
@@ -357,21 +365,11 @@ class DiffusionSampler:
         width = self.WIDTH
         device = c2w.device
 
-        x, y = torch.meshgrid(
-            torch.arange(width),
-            torch.arange(height),
-        )
-        # for pytorch 1.9 cannot specify indexing="xy"
-        x = x.transpose(0, 1)
-        y = y.transpose(0, 1)
-        
-        x = x.flatten().to(device)
-        y = y.flatten().to(device)
         camera_dirs = torch.stack(
             [
-                (x - intrinsic[0, 2] + 0.5) / intrinsic[0, 0],
-                (y - intrinsic[1, 2] + 0.5) / intrinsic[1, 1],
-                torch.ones_like(y),
+                (self.pixel_x - intrinsic[0, 2] + 0.5) / intrinsic[0, 0],
+                (self.pixel_y - intrinsic[1, 2] + 0.5) / intrinsic[1, 1],
+                torch.ones_like(self.pixel_y, device=device),
             ],
             dim=-1,
         )  # [num_rays,3]
