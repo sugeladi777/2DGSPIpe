@@ -8,6 +8,17 @@ parser.add_argument('--num_view', type=int, default=16)
 parser.add_argument('--syn', type=int, default=1)
 parser.add_argument('--vis_freq', type=int, default=50)
 parser.add_argument('--data_root', type=str, required=True)
+parser.add_argument('--lr', type=float, default=0.005)
+parser.add_argument('--total_iter', type=int, default=151)
+parser.add_argument('--val_ratio', type=float, default=0.125)
+parser.add_argument('--weight_loss_tau', type=float, default=30.0)
+parser.add_argument('--rgb_loss_weight', type=float, default=1.0)
+parser.add_argument('--grad_loss_weight', type=float, default=5.0)
+parser.add_argument('--lpips_loss_weight', type=float, default=0.05)
+parser.add_argument('--lpips_start_iter', type=int, default=80)
+parser.add_argument('--lpips_downsample', type=int, default=256)
+parser.add_argument('--grad_use_view_weight', type=int, default=1)
+parser.add_argument('--recompute_loss_weight', action='store_true')
 
 opt = parser.parse_args()
 
@@ -44,6 +55,7 @@ net_cfg = {
     "uv_reso_w": 1024,
     "uv_reso_h": 1024,
     "batch_size": 1048576,
+    "residual_scale": 0.25,
 }
 
 
@@ -60,19 +72,46 @@ def compute_vertex_visibility_o3d(o3d_scene, point, uv_vertices):
     return intersection_counts.numpy()
 
 
+def split_holdout_frames(frames, val_ratio):
+    if not 0.0 < val_ratio < 1.0:
+        raise ValueError("--val_ratio must be in (0, 1)")
+    total = len(frames)
+    if total < 2:
+        raise RuntimeError("Need at least 2 frames to build a true holdout split.")
+
+    interval = max(1, int(round(1.0 / val_ratio)))
+    offset = min(total - 1, interval // 2)
+    val_indices = list(range(offset, total, interval))
+    if not val_indices:
+        val_indices = [total // 2]
+    if len(val_indices) >= total:
+        val_indices = [total - 1]
+
+    val_index_set = set(val_indices)
+    train_frames = [frame for idx, frame in enumerate(frames) if idx not in val_index_set]
+    val_frames = [frame for idx, frame in enumerate(frames) if idx in val_index_set]
+    if not train_frames or not val_frames:
+        raise RuntimeError("Failed to build a non-empty train/val holdout split.")
+    return train_frames, val_frames
+
+
 class UVInstantNGP(nn.Module):
     '''
-    map a 2d position to its uv parameters
+    Explicit UV texture map plus a small residual hash network.
     '''
     def __init__(self, cfg):
         super().__init__()
         self.width = cfg["uv_reso_w"]
         self.height = cfg["uv_reso_h"]
         self.cfg = cfg
+        self.residual_scale = cfg.get("residual_scale", 0.25)
+
+        # A learnable texture atlas acts as the main signal carrier.
+        self.texture_map = nn.Parameter(torch.zeros(1, 3, self.height, self.width))
 
         finest_level = cfg["finest_level"]
         log2_hashmap_size = cfg["log2_hashmap_size"]
-        self.diff_uv_net = InstantNGPNetwork(
+        self.residual_hashnet = InstantNGPNetwork(
             finest_level=finest_level, log2_hashmap_size=log2_hashmap_size, out_chns=3,
         )
         self.register_buffer("uv_coord", self._build_uv_coord(), persistent=False)
@@ -102,10 +141,18 @@ class UVInstantNGP(nn.Module):
         res_list = res_list.reshape(self.height, self.width, -1)
         return res_list.permute(2, 0, 1)
         
+    def get_base_texture(self):
+        return torch.sigmoid(self.texture_map)
+
+    def get_residual_texture(self):
+        residual = self._batch_forward(self.residual_hashnet)
+        residual = self.residual_scale * torch.tanh(residual)
+        return residual[None, ...]
+
     def forward(self):
-        diff_uv = self._batch_forward(self.diff_uv_net)        
-        diff_uv = torch.sigmoid(diff_uv)
-        return diff_uv[None, ...]
+        base_texture = self.get_base_texture()
+        residual_texture = self.get_residual_texture()
+        return torch.clamp(base_texture + residual_texture, 0.0, 1.0)
 
 
 def nerf_matrix_to_ngp(pose, scale=0.33):
@@ -145,11 +192,12 @@ class MetaShapeDataset(Dataset):
         self.intrinsic_rel[1] /= self.HEIGHT
         
         # split dataset
-        frames = meta["frames"]
-        frames = sorted(frames, key=lambda d: d['file_path'])
-        skip_data_size = math.ceil(len(frames) / opt.num_view)
+        all_frames = sorted(meta["frames"], key=lambda d: d['file_path'])
+        train_frames, val_frames = split_holdout_frames(all_frames, opt.val_ratio)
         if mode in ["val"]:
-            frames = frames[::skip_data_size]
+            frames = val_frames
+        else:
+            frames = train_frames
         self.frames = frames
         self.num_frames = len(self.frames)
 
@@ -175,7 +223,7 @@ class MetaShapeDataset(Dataset):
             self.images.append(img)
             mask = self._load_img(os.path.join(mask_dir, img_name))
             self.masks.append(mask[:1])
-            uv = torch.load(os.path.join(uv_dir, uv_img_name), map_location=self.device)[0]
+            uv = torch.load(os.path.join(uv_dir, uv_img_name), map_location="cpu")[0].float()
             self.uv_images.append(uv)
             self.img_idx.append(cnt)
             self.img_name_list.append(img_name)
@@ -232,25 +280,26 @@ class DiffusionSampler:
         self.device = "cuda"
         self.log_dir = os.path.join(opt.data_root, "texture", opt.img_name)
         self.gamma = 2.2
+        self.pin_memory = torch.cuda.is_available()
 
         # set dataset
         train_data = MetaShapeDataset(
+            device="cpu", meta_file_path=opt.meta_file_path, mode="train",
+        )
+        val_data = MetaShapeDataset(
             device="cpu", meta_file_path=opt.meta_file_path, mode="val",
         )
+        self.train_frame_count = train_data.num_frames
+        self.val_frame_count = val_data.num_frames
         self.batch_size = 4
         
-        self.dataloader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
-        self.val_dataloader = DataLoader(train_data, batch_size=1, shuffle=False)
+        self.dataloader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True, pin_memory=self.pin_memory)
+        self.weight_dataloader = DataLoader(train_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
+        self.val_dataloader = DataLoader(val_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
 
         self.HEIGHT = train_data.HEIGHT  # image height
         self.WIDTH = train_data.WIDTH  # image width
-        self.weight_loss_tau = 100
-        x, y = torch.meshgrid(
-            torch.arange(self.WIDTH, device=self.device),
-            torch.arange(self.HEIGHT, device=self.device),
-        )
-        self.pixel_x = x.transpose(0, 1).flatten()
-        self.pixel_y = y.transpose(0, 1).flatten()
+        self.weight_loss_tau = opt.weight_loss_tau
 
         self.uv_reso_h = net_cfg["uv_reso_h"]
         self.uv_reso_w = net_cfg["uv_reso_w"]
@@ -265,8 +314,124 @@ class DiffusionSampler:
         data_root = os.path.dirname(opt.meta_file_path)
         self.mesh_path = os.path.join(data_root, "final_hack.obj")
         self._load_geometry(self.mesh_path)
+        self.loss_weight_cache_path = self._build_loss_weight_cache_path()
 
-        self.loss_weight_img = self.compute_loss_weight()
+        self.loss_weight_img = self.load_or_compute_loss_weight()
+        self.initialize_texture_map_from_views(train_data)
+        print(
+            "[Holdout] train=%d, val=%d, val_ratio=%.3f"
+            % (self.train_frame_count, self.val_frame_count, opt.val_ratio)
+        )
+
+    def weighted_l1_loss(self, pred, target, weight):
+        weight = weight.expand_as(pred)
+        diff = torch.abs(pred - target) * weight
+        denom = weight.sum().clamp_min(1e-6)
+        return diff.sum() / denom
+
+    def masked_l1_loss(self, pred, target, mask):
+        mask = mask.expand_as(pred)
+        diff = torch.abs(pred - target) * mask
+        denom = mask.sum().clamp_min(1e-6)
+        return diff.sum() / denom
+
+    def downsample_for_lpips(self, pred, target):
+        max_side = opt.lpips_downsample
+        height, width = pred.shape[-2:]
+        cur_max_side = max(height, width)
+        if cur_max_side <= max_side:
+            return pred, target
+
+        scale = max_side / float(cur_max_side)
+        out_h = max(1, int(round(height * scale)))
+        out_w = max(1, int(round(width * scale)))
+        pred_small = F.interpolate(pred, size=(out_h, out_w), mode="bilinear", align_corners=False)
+        target_small = F.interpolate(target, size=(out_h, out_w), mode="bilinear", align_corners=False)
+        return pred_small, target_small
+
+    def build_texture_map_init(self, train_data):
+        texel_count = self.uv_reso_h * self.uv_reso_w
+        accum_color = torch.zeros(3, texel_count, dtype=torch.float32)
+        accum_weight = torch.zeros(1, texel_count, dtype=torch.float32)
+        global_color_sum = torch.zeros(3, dtype=torch.float32)
+        global_weight_sum = torch.zeros(1, dtype=torch.float32)
+
+        view_weight_list = self.loss_weight_img.detach().cpu()
+        for img, mask, uv, view_weight in zip(
+            train_data.images,
+            train_data.masks,
+            train_data.uv_images,
+            view_weight_list,
+        ):
+            img = img.float()
+            if img.shape[0] == 4:
+                alpha = img[3:4]
+                img = img[:3] * alpha
+                mask = mask * alpha
+            else:
+                img = img[:3]
+
+            pixel_weight = (mask.float() * view_weight.float()).reshape(-1)
+            valid = pixel_weight > 1e-8
+            if not torch.any(valid):
+                continue
+
+            colors = img.permute(1, 2, 0).reshape(-1, 3)[valid]
+            uv_coord = uv.permute(1, 2, 0).reshape(-1, 2)[valid]
+            pixel_weight = pixel_weight[valid]
+
+            global_color_sum += torch.sum(colors * pixel_weight[:, None], dim=0)
+            global_weight_sum += torch.sum(pixel_weight)
+
+            u = (uv_coord[:, 0] + 1.0) * 0.5 * (self.uv_reso_w - 1)
+            v = (uv_coord[:, 1] + 1.0) * 0.5 * (self.uv_reso_h - 1)
+
+            x0 = torch.floor(u).long()
+            y0 = torch.floor(v).long()
+            x1 = torch.clamp(x0 + 1, max=self.uv_reso_w - 1)
+            y1 = torch.clamp(y0 + 1, max=self.uv_reso_h - 1)
+
+            wx1 = u - x0.float()
+            wy1 = v - y0.float()
+            wx0 = 1.0 - wx1
+            wy0 = 1.0 - wy1
+
+            for x_idx, y_idx, bilinear_weight in (
+                (x0, y0, wx0 * wy0),
+                (x0, y1, wx0 * wy1),
+                (x1, y0, wx1 * wy0),
+                (x1, y1, wx1 * wy1),
+            ):
+                splat_weight = pixel_weight * bilinear_weight
+                flat_idx = y_idx * self.uv_reso_w + x_idx
+                accum_weight.index_add_(1, flat_idx, splat_weight[None, :])
+                accum_color.index_add_(1, flat_idx, colors.t() * splat_weight[None, :])
+
+        if global_weight_sum.item() > 0:
+            fill_color = global_color_sum / global_weight_sum.clamp_min(1e-6)
+        else:
+            fill_color = torch.full((3,), 0.5, dtype=torch.float32)
+
+        init_texture = fill_color[:, None].repeat(1, texel_count)
+        valid_texel = accum_weight[0] > 1e-8
+        init_texture[:, valid_texel] = accum_color[:, valid_texel] / accum_weight[:, valid_texel]
+        init_texture = init_texture.view(1, 3, self.uv_reso_h, self.uv_reso_w)
+
+        covered_texel = int(valid_texel.sum().item())
+        valid_uv_texel = int((self.uv_nonuse_mask[0, 0] < 0.5).sum().item())
+        coverage_ratio = 0.0 if valid_uv_texel == 0 else covered_texel / float(valid_uv_texel)
+        print(
+            "[Texture Init] covered_uv_texels=%d/%d (%.2f%%)"
+            % (covered_texel, valid_uv_texel, coverage_ratio * 100.0)
+        )
+        return init_texture
+
+    def initialize_texture_map_from_views(self, train_data):
+        with torch.no_grad():
+            init_texture = self.build_texture_map_init(train_data)
+            init_texture = init_texture.clamp(1e-4, 1.0 - 1e-4)
+            init_param = torch.logit(init_texture)
+            self.network.texture_map.copy_(init_param.to(self.device))
 
     def _write_textured_obj(self, src_obj_path, dst_obj_path, mtl_name, material_name="material_0"):
         with open(src_obj_path, "r") as f:
@@ -320,15 +485,64 @@ class DiffusionSampler:
         print(f"[Texture Export] texture: {texture_path}")
         print(f"[Texture Export] mtl: {mtl_path}")
         print(f"[Texture Export] textured obj: {dst_obj_path}")
+
+    def _build_loss_weight_cache_path(self):
+        tau_str = str(self.weight_loss_tau).replace(".", "p")
+        val_ratio_str = str(opt.val_ratio).replace(".", "p")
+        return os.path.join(
+            opt.data_root,
+            f"loss_weight_tau{tau_str}_train{self.train_frame_count}_holdout{val_ratio_str}_uv{self.uv_reso_h}x{self.uv_reso_w}.pt",
+        )
+
+    def _move_batch_to_device(self, data, keys=None):
+        move_keys = data.keys() if keys is None else keys
+        for k in move_keys:
+            v = data[k]
+            if torch.is_tensor(v):
+                data[k] = v.to(self.device, non_blocking=self.pin_memory)
+        return data
+
+    def _loss_weight_dependencies(self):
+        deps = [self.mesh_path, opt.meta_file_path]
+        uv_root = os.path.join(opt.data_root, "uv")
+        if os.path.isdir(uv_root):
+            deps.extend(
+                os.path.join(uv_root, name)
+                for name in sorted(os.listdir(uv_root))
+                if name.endswith(".pkl")
+            )
+        return deps
+
+    def _is_loss_weight_cache_valid(self):
+        if opt.recompute_loss_weight or not os.path.isfile(self.loss_weight_cache_path):
+            return False
+        cache_mtime = os.path.getmtime(self.loss_weight_cache_path)
+        for dep in self._loss_weight_dependencies():
+            if not os.path.isfile(dep):
+                return False
+            if os.path.getmtime(dep) > cache_mtime:
+                return False
+        return True
+
+    def load_or_compute_loss_weight(self):
+        if self._is_loss_weight_cache_valid():
+            print(f"[Loss Weight] load cache: {self.loss_weight_cache_path}")
+            cached = torch.load(self.loss_weight_cache_path, map_location="cpu")
+            return cached.to(self.device, non_blocking=self.pin_memory)
+
+        loss_weight_img = self.compute_loss_weight()
+        torch.save(loss_weight_img.detach().cpu(), self.loss_weight_cache_path)
+        print(f"[Loss Weight] save cache: {self.loss_weight_cache_path}")
+        return loss_weight_img
     
     def _load_geometry(self, mesh_uv_path):
         device = self.device
         mesh = trimesh.load_mesh(mesh_uv_path)
-        uv = torch.from_numpy(mesh.visual.uv).to(device).float()  # [v,2]
-        vertices = torch.from_numpy(mesh.vertices).to(device).float()  # [v,3]
-        normal = torch.from_numpy(mesh.vertex_normals).to(device).float()  # [v,3]
+        uv = torch.from_numpy(np.array(mesh.visual.uv, copy=True)).to(device).float()  # [v,2]
+        vertices = torch.from_numpy(np.array(mesh.vertices, copy=True)).to(device).float()  # [v,3]
+        normal = torch.from_numpy(np.array(mesh.vertex_normals, copy=True)).to(device).float()  # [v,3]
         normal = F.normalize(normal, dim=-1)
-        faces = torch.from_numpy(mesh.faces).to(device)  # [f,3]
+        faces = torch.from_numpy(np.array(mesh.faces, copy=True)).to(device)  # [f,3]
         self.mesh = mesh
         self.uv = uv[None, ...]  # [1,v,2]
         self.uv = 2 * self.uv - 1
@@ -354,48 +568,16 @@ class DiffusionSampler:
         self.object_normal_lr_4k = torch.clone(normal_uv)  # [1,3,uh,uw]
         self.position_uv = torch.clone(pos_uv)  # [1,1,uh,uw]
         self.uv_nonuse_mask = (uv_pix_to_face == -1).float().permute(0, 3, 1, 2)  # [1,1,uh,uw]
-
-    def compute_rays(self, data):
-        '''
-        c2w: [b,4,4]
-        '''
-        c2w = data["c2w"]
-        intrinsic = data["intrinsic"][0]
-        height = self.HEIGHT
-        width = self.WIDTH
-        device = c2w.device
-
-        camera_dirs = torch.stack(
-            [
-                (self.pixel_x - intrinsic[0, 2] + 0.5) / intrinsic[0, 0],
-                (self.pixel_y - intrinsic[1, 2] + 0.5) / intrinsic[1, 1],
-                torch.ones_like(self.pixel_y, device=device),
-            ],
-            dim=-1,
-        )  # [num_rays,3]
-
-        # transform view direction to world space
-        directions = torch.matmul(c2w[:, None, :3, :3], camera_dirs[..., None])[..., 0]  # [b,num_rays,3]
-        origins = c2w[:, :3, -1]  # [b,3]
-        viewdirs = directions / torch.linalg.norm(
-            directions, dim=-1, keepdims=True
-        )
-        viewdirs = torch.reshape(viewdirs, (-1, height, width, 3))  # [b,h,w,3]
-        return origins, viewdirs
+        self.valid_uv_mask_flat = (self.uv_nonuse_mask[0, 0].reshape(-1) < 0.5)
 
     def render_in_uv(self, data, shading):
-        for k in data:
-            try:
-                data[k] = data[k].to(self.device)
-            except:
-                pass
-        
-        c2w = data["c2w"]
+        data = self._move_batch_to_device(data, keys=("pixels", "mask", "uv", "idx"))
         uv_img = data["uv"]
         uv_img = uv_img.permute(0, 2, 3, 1).contiguous()
+        shading_img = shading.permute(0, 3, 1, 2).expand(uv_img.shape[0], -1, -1, -1)
         
         tex_img = F.grid_sample(
-            shading.permute(0, 3, 1, 2).repeat(len(uv_img), 1, 1, 1), 
+            shading_img,
             uv_img, 
             align_corners=True
         )  # [b,3,h,w]   
@@ -406,8 +588,8 @@ class DiffusionSampler:
         uv_viewdir = []
         uv_list = []
         vis_list = []
-        verts_uv_np = self.position_uv[0].permute(1, 2, 0).reshape(-1, 3).cpu().numpy()
-        cnt = 0
+        verts_uv = self.position_uv[0].permute(1, 2, 0).reshape(-1, 3)[self.valid_uv_mask_flat]
+        verts_uv_np = verts_uv.detach().cpu().numpy()
         ks = 15
         kernel = torch.ones(ks, ks).to(self.device)
 
@@ -415,28 +597,25 @@ class DiffusionSampler:
         mesh_legacy = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
         scene = o3d.t.geometry.RaycastingScene()
         scene.add_triangles(mesh_legacy)
-        for data in tqdm(self.val_dataloader):
-            for k in data:
-                try:
-                    data[k] = data[k].to(self.device)
-                except:
-                    pass
-            origins, viewdirs = self.compute_rays(data)
-            origins_np = origins[0].cpu().numpy()
-            
-            vis_mask = compute_vertex_visibility_o3d(
-                o3d_scene=scene, point=origins_np, uv_vertices=verts_uv_np,
-            )
-            vis_mask_torch = torch.from_numpy(vis_mask).float().to(self.device).reshape(1, 1, self.uv_reso_h, self.uv_reso_w)
-            vis_mask_torch = (vis_mask_torch <= 1).float()
+        with torch.inference_mode():
+            for data in tqdm(self.weight_dataloader):
+                data = self._move_batch_to_device(data, keys=("c2w", "uv"))
+                origins = data["c2w"][:, :3, -1]
+                origins_np = origins[0].cpu().numpy()
 
-            vis_mask_torch = kornia.morphology.erosion(vis_mask_torch, kernel=kernel)
-            vis_list.append(vis_mask_torch)
-            # save_image(vis_mask_torch, os.path.join("workspace/weight_img_vis_erode", "%05d.jpg" % cnt))
-            cnt += 1
-            cur_uv_viewdir = F.normalize(self.position_uv - origins[..., None, None], dim=1)
-            uv_viewdir.append(cur_uv_viewdir)
-            uv_list.append(data["uv"])
+                vis_mask = compute_vertex_visibility_o3d(
+                    o3d_scene=scene, point=origins_np, uv_vertices=verts_uv_np,
+                )
+                vis_mask_flat = torch.zeros(self.uv_reso_h * self.uv_reso_w, device=self.device)
+                vis_mask_flat[self.valid_uv_mask_flat] = torch.from_numpy(vis_mask).to(self.device).float()
+                vis_mask_torch = vis_mask_flat.reshape(1, 1, self.uv_reso_h, self.uv_reso_w)
+                vis_mask_torch = (vis_mask_torch <= 1).float()
+
+                vis_mask_torch = kornia.morphology.erosion(vis_mask_torch, kernel=kernel)
+                vis_list.append(vis_mask_torch)
+                cur_uv_viewdir = F.normalize(self.position_uv - origins[..., None, None], dim=1)
+                uv_viewdir.append(cur_uv_viewdir)
+                uv_list.append(data["uv"])
         uv_viewdir = torch.cat(uv_viewdir, dim=0)
         uv_list = torch.cat(uv_list, dim=0)
 
@@ -458,13 +637,17 @@ class DiffusionSampler:
         return weight_img
 
     def optimize(self):
-        params = [{"params": self.network.parameters()}]
-        lr = 0.01
-        optimizer = torch.optim.Adam(params=params, lr=lr)
+        optimizer = torch.optim.Adam(self.network.parameters(), lr=opt.lr)
         grad_scaler = torch.cuda.amp.GradScaler(2 ** 10)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=opt.total_iter,
+            eta_min=opt.lr * 0.1,
+        )
         writer = SummaryWriter(self.log_dir)
+        print("[Optimizer] lr=%.6f" % opt.lr)
         
-        for i in tqdm(range(151)):
+        for i in tqdm(range(opt.total_iter)):
             for data in self.dataloader:
                 uv_shading = self.network().permute(0, 2, 3, 1).contiguous()
                 render = self.render_in_uv(data, uv_shading)
@@ -476,27 +659,39 @@ class DiffusionSampler:
                 img_pred = render * mask
                 img_gt = gt * mask
 
+                loss_rgb = self.masked_l1_loss(img_pred, img_gt, mask)
                 grad_gt = kornia.filters.spatial_gradient(img_gt)
                 grad_pred = kornia.filters.spatial_gradient(img_pred)
-                loss_l1 = F.l1_loss(grad_pred * weight_img[:, :, None, ...], grad_gt * weight_img[:, :, None, ...])
-                
-                if i > 100:
-                    loss_lpips = self.lpips_loss(img_pred, img_gt, normalize=True).mean()
-                    loss = 10 * loss_l1 + 0.1 * loss_lpips
+                if opt.grad_use_view_weight:
+                    grad_weight = weight_img[:, :, None, ...] * mask[:, :, None, ...]
+                    loss_grad = self.weighted_l1_loss(grad_pred, grad_gt, grad_weight)
                 else:
-                    loss = 10 * loss_l1
+                    loss_grad = self.masked_l1_loss(grad_pred, grad_gt, mask[:, :, None, ...])
+                
+                loss = opt.rgb_loss_weight * loss_rgb + opt.grad_loss_weight * loss_grad
+                loss_lpips = torch.zeros((), device=self.device)
+                if i >= opt.lpips_start_iter:
+                    img_pred_lpips, img_gt_lpips = self.downsample_for_lpips(img_pred, img_gt)
+                    loss_lpips = self.lpips_loss(img_pred_lpips, img_gt_lpips, normalize=True).mean()
+                    loss = loss + opt.lpips_loss_weight * loss_lpips
 
                 optimizer.zero_grad()
                 grad_scaler.scale(loss).backward()
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
 
-                writer.add_scalar('L1 Loss', loss_l1.item(), i)
+                writer.add_scalar('loss/total', loss.item(), i)
+                writer.add_scalar('loss/rgb', loss_rgb.item(), i)
+                writer.add_scalar('loss/grad', loss_grad.item(), i)
+                writer.add_scalar('loss/lpips_train', loss_lpips.item(), i)
 
+            scheduler.step()
+            writer.add_scalar('train/lr', optimizer.param_groups[0]["lr"], i)
             if i % opt.vis_freq == 0:
                 cur_log_dir = os.path.join(self.log_dir, "%05d" % i)
                 os.makedirs(cur_log_dir, exist_ok=True)
                 with torch.no_grad():
+                    uv_shading_eval = self.network().permute(0, 2, 3, 1).contiguous()
                     render_list = []
                     gt_list = []
                     psnr_list = []
@@ -504,7 +699,7 @@ class DiffusionSampler:
                     lpips_list = []
                     img_name_list = []
                     for data in self.val_dataloader:
-                        render = self.render_in_uv(data, uv_shading)
+                        render = self.render_in_uv(data, uv_shading_eval)
                         mask = data["mask"]
                         gt = data["pixels"]
                         img_pred = render * mask
@@ -523,8 +718,8 @@ class DiffusionSampler:
                     gt_list = torch.cat(gt_list, dim=0)
                     save_image(render_list, os.path.join(cur_log_dir, "render.jpg"))
                     save_image(gt_list, os.path.join(cur_log_dir, "gt.jpg"))
-                    save_image(uv_shading.permute(0, 3, 1, 2), os.path.join(cur_log_dir, "uv.png"))
-                    save_image(uv_shading.permute(0, 3, 1, 2), os.path.join(cur_log_dir, "uv_vis.png"))
+                    save_image(uv_shading_eval.permute(0, 3, 1, 2), os.path.join(cur_log_dir, "uv.png"))
+                    save_image(uv_shading_eval.permute(0, 3, 1, 2), os.path.join(cur_log_dir, "uv_vis.png"))
 
                     psnr_score = sum(psnr_list) / len(psnr_list)
                     ssim_score = sum(ssim_list) / len(ssim_list)

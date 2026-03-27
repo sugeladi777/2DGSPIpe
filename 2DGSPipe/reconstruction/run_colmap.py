@@ -11,6 +11,9 @@ def run_cmd(cmd: Iterable[str]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
+    parser.add_argument("--matcher", type=str, default="sequential", choices=["sequential", "exhaustive"])
+    parser.add_argument("--sequential_overlap", type=int, default=10)
+    parser.add_argument("--sequential_quadratic_overlap", type=int, default=1)
     args = parser.parse_args()
     data_root = os.path.abspath(args.data_root)
 
@@ -42,18 +45,41 @@ def main() -> None:
         ]
     )
 
-    run_cmd(
-        [
-            "colmap",
-            "exhaustive_matcher",
-            "--database_path",
-            database_root,
-            "--FeatureMatching.guided_matching",
-            "1",
-            "--FeatureMatching.use_gpu",
-            "1",
-        ]
-    )
+    if args.matcher == "sequential":
+        print(
+            f"[COLMAP] matcher=sequential overlap={args.sequential_overlap} "
+            f"quadratic_overlap={args.sequential_quadratic_overlap}"
+        )
+        run_cmd(
+            [
+                "colmap",
+                "sequential_matcher",
+                "--database_path",
+                database_root,
+                "--FeatureMatching.guided_matching",
+                "1",
+                "--FeatureMatching.use_gpu",
+                "1",
+                "--SequentialMatching.overlap",
+                str(args.sequential_overlap),
+                "--SequentialMatching.quadratic_overlap",
+                str(args.sequential_quadratic_overlap),
+            ]
+        )
+    else:
+        print("[COLMAP] matcher=exhaustive")
+        run_cmd(
+            [
+                "colmap",
+                "exhaustive_matcher",
+                "--database_path",
+                database_root,
+                "--FeatureMatching.guided_matching",
+                "1",
+                "--FeatureMatching.use_gpu",
+                "1",
+            ]
+        )
 
     os.makedirs(sparse_root, exist_ok=True)
     run_cmd(

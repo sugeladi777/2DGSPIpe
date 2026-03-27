@@ -55,7 +55,7 @@ def run_job(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_dir", type=str, default="/home/lichengkai/RGB_Recon/input/test")
-    parser.add_argument("--output_root", type=str, default="/home/lichengkai/RGB_Recon/output/2026.3.27/less_fracture")
+    parser.add_argument("--output_root", type=str, default="/home/lichengkai/RGB_Recon/output/2026.3.27/texture_map_improve")
     parser.add_argument("--gpus", type=str, default="0,1", help="Comma-separated GPU IDs, e.g. 0,1")
     parser.add_argument("--base_port", type=int, default=6009)
     parser.add_argument("--func", type=str, default="extract-mat-face-recon-uv-tex")

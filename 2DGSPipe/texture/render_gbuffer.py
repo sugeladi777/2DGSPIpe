@@ -1,12 +1,11 @@
 import os
 import argparse
 import numpy as np
+import cv2
 import trimesh
 from tqdm import tqdm
 import json
-from PIL import Image
 import torch
-from torchvision import transforms
 from torchvision.utils import save_image
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
@@ -18,6 +17,9 @@ parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFo
 parser.add_argument('--device', type=str, default="0")
 parser.add_argument('--syn', type=int, default=1)
 parser.add_argument('--data_root', type=str, required=True)
+parser.add_argument('--batch_size', type=int, default=4)
+parser.add_argument('--save_uv_vis', type=int, default=0)
+parser.add_argument('--save_pho_mask', type=int, default=0)
 opt = parser.parse_args()
 
 opt.meta_file_path = os.path.join(opt.data_root, "transforms.json")
@@ -37,12 +39,10 @@ def nerf_matrix_to_ngp(pose, scale=0.33):
 
 
 class MetaShapeDataset(Dataset):
-    def __init__(self, device, meta_file_path, mode="train", cache_image=True):
+    def __init__(self, meta_file_path, mode="train"):
         super().__init__()
         self.id_root = opt.data_root
-        self.device = device
         self.mode = mode
-        self.cache_image = cache_image
 
         with open(meta_file_path, 'r') as f:
             meta = json.load(f)
@@ -56,7 +56,7 @@ class MetaShapeDataset(Dataset):
         self.intrinsic[1, 1] = meta['fl_y']
         self.intrinsic[0, 2] = meta['cx']
         self.intrinsic[1, 2] = meta['cy']
-        self.intrinsic = torch.from_numpy(self.intrinsic).to(self.device)
+        self.intrinsic = torch.from_numpy(self.intrinsic)
         self.intrinsic_rel = torch.clone(self.intrinsic)
         self.intrinsic_rel[0] /= self.WIDTH
         self.intrinsic_rel[1] /= self.HEIGHT
@@ -69,13 +69,8 @@ class MetaShapeDataset(Dataset):
         self.frames = frames
         self.num_frames = len(self.frames)
 
-        image_dir = os.path.join(self.id_root, "image")
-        # spec_image_dir = os.path.join(self.id_root, "spec")
-        mask_dir = os.path.join(self.id_root, "mask")
-
         # load per-frame meta information
         self.cam2world = []
-        self.images, self.masks, self.spec_images = [], [], []
         self.img_name_list = []
         for f_id in tqdm(range(self.num_frames)):
             cur_pose = np.array(frames[f_id]['transform_matrix'], dtype=np.float32)
@@ -84,61 +79,22 @@ class MetaShapeDataset(Dataset):
             self.cam2world.append(cur_pose)
             img_name = os.path.basename(frames[f_id]['file_path'])
             self.img_name_list.append(img_name)
-            if self.cache_image:
-                # spec_img = self._load_img(os.path.join(spec_image_dir, img_name))
-                # self.spec_images.append(spec_img)
-                img = self._load_img(os.path.join(image_dir, img_name))
-                self.images.append(img)
-                mask = self._load_img(os.path.join(mask_dir, img_name))
-                self.masks.append(mask[:1])
-            else:
-                # self.spec_images.append(os.path.join(spec_image_dir, img_name))
-                self.images.append(os.path.join(image_dir, img_name))
-                self.masks.append(os.path.join(mask_dir, img_name))
-
-        if self.cache_image:
-            self.images = torch.stack(self.images, dim=0)  # [b,3,h,w]
-            # self.spec_images = torch.stack(self.spec_images, dim=0)  # [b,3,h,w]
-            self.masks = torch.stack(self.masks, dim=0)  # [b,1,h,w]
         
         self.cam2world = np.stack(self.cam2world, axis=0).astype(np.float32)  # [nf,4,4]
-        self.cam2world = torch.from_numpy(self.cam2world).to(self.device)  # [nf,4,4]
+        self.cam2world = torch.from_numpy(self.cam2world)  # [nf,4,4]
 
         print("Create [%s] dataset, total [%d] frames" % (self.mode, self.num_frames))
 
     def __len__(self):
         return self.num_frames
-        
-    def _load_img(self, pth):
-        if os.path.exists(pth):
-            img = transforms.ToTensor()(Image.open(pth))[:3]
-            return img.to(self.device)
-        else:
-            return torch.zeros(3, self.HEIGHT, self.WIDTH).to(self.device)
-        
-    def __getitem__(self, index):
-        if self.cache_image:
-            img = self.images[index]
-            render_mask = self.masks[index]
-            # spec_img = self.spec_images[index]
-        else:
-            img = self._load_img(self.images[index])
-            render_mask = self._load_img(self.masks[index])[:1]
-            # spec_img = self._load_img(self.spec_images[index])
 
+    def __getitem__(self, index):
         c2w = self.cam2world[index]
-        
-        # origins, viewdirs = self._compute_ray(c2w)
         info = {
-            "pixels": img,  # [3,h,w]
-            "mask": render_mask,  # [1,h,w]
-            # "spec": spec_img,
             "c2w": c2w,  # [4,4]
             "intrinsic": self.intrinsic,
             "intrinsic_rel": self.intrinsic_rel,
             "img_name": self.img_name_list[index],
-            # "origins": origins[0],  # [3,h,w]
-            # "viewdirs": viewdirs[0],  # [3,h,w]
         }
         return info
 
@@ -146,40 +102,39 @@ class MetaShapeDataset(Dataset):
 class DiffusionSampler:
     def __init__(self, opt):
         self.device = opt.device
+        self.pin_memory = torch.cuda.is_available()
         self.mesh_renderer_pt3d = MeshRenderer(self.device)
 
         # set dataset
         train_data = MetaShapeDataset(
-            device=self.device, meta_file_path=opt.meta_file_path, mode="train",
+            meta_file_path=opt.meta_file_path, mode="train",
         )
-        self.dataloader = DataLoader(train_data, batch_size=1, shuffle=False)
+        self.dataloader = DataLoader(train_data, batch_size=opt.batch_size, shuffle=False, pin_memory=self.pin_memory)
         self._load_geometry(os.path.join(opt.data_root, "final_hack.obj"))
 
         self.HEIGHT = train_data.HEIGHT
         self.WIDTH = train_data.WIDTH
-        x, y = torch.meshgrid(
-            torch.arange(self.WIDTH, device=self.device),
-            torch.arange(self.HEIGHT, device=self.device),
-        )
-        self.pixel_x = x.transpose(0, 1).flatten()
-        self.pixel_y = y.transpose(0, 1).flatten()
         data_root = opt.data_root
         self.save_root = os.path.join(data_root, "uv")
-        self.save_vis_root = os.path.join(data_root, "uv_vis")
         self.save_mask_root = os.path.join(data_root, "uv_mask")
-        self.save_pho_mask_root = os.path.join(data_root, "pho_mask")
         os.makedirs(self.save_root, exist_ok=True)
-        os.makedirs(self.save_vis_root, exist_ok=True)
         os.makedirs(self.save_mask_root, exist_ok=True)
-        os.makedirs(self.save_pho_mask_root, exist_ok=True)
+        self.save_vis_root = None
+        self.save_pho_mask_root = None
+        if opt.save_uv_vis:
+            self.save_vis_root = os.path.join(data_root, "uv_vis")
+            os.makedirs(self.save_vis_root, exist_ok=True)
+        if opt.save_pho_mask:
+            self.save_pho_mask_root = os.path.join(data_root, "pho_mask")
+            os.makedirs(self.save_pho_mask_root, exist_ok=True)
 
     def _load_geometry(self, mesh_uv_path):
         device = self.device
         mesh = trimesh.load_mesh(mesh_uv_path)
-        uv = torch.from_numpy(mesh.visual.uv).to(device).float()  # [v,2]
-        vertices = torch.from_numpy(mesh.vertices).to(device).float()  # [v,3]
-        self.vert_normal = torch.from_numpy(mesh.vertex_normals).to(device).float()  # [v,3]
-        faces = torch.from_numpy(mesh.faces).to(device)  # [f,3]
+        uv = torch.from_numpy(np.array(mesh.visual.uv, copy=True)).to(device).float()  # [v,2]
+        vertices = torch.from_numpy(np.array(mesh.vertices, copy=True)).to(device).float()  # [v,3]
+        self.vert_normal = torch.from_numpy(np.array(mesh.vertex_normals, copy=True)).to(device).float()  # [v,3]
+        faces = torch.from_numpy(np.array(mesh.faces, copy=True)).to(device)  # [f,3]
         self.mesh = mesh
         self.uv = uv[None, ...]  # [1,v,2]
         self.uv = 2 * self.uv - 1
@@ -187,71 +142,52 @@ class DiffusionSampler:
         self.vertices = vertices[None, ...]  # [1,v,3]
         self.faces = faces[None, ...]  # [1,v,3]
 
-    def compute_rays(self, data):
-        '''
-        c2w: [b,4,4]
-        '''
-        c2w = data["c2w"]
-        intrinsic = data["intrinsic"][0]
-        height = self.HEIGHT
-        width = self.WIDTH
-        device = self.device
-
-        camera_dirs = torch.stack(
-            [
-                (self.pixel_x - intrinsic[0, 2] + 0.5) / intrinsic[0, 0],
-                (self.pixel_y - intrinsic[1, 2] + 0.5) / intrinsic[1, 1],
-                torch.ones_like(self.pixel_y, device=device),
-            ],
-            dim=-1,
-        )  # [num_rays,3]
-
-        # transform view direction to world space
-        directions = torch.matmul(c2w[:, None, :3, :3], camera_dirs[..., None])[..., 0]  # [b,num_rays,3]
-        origins = c2w[:, :3, -1]  # [b,3]
-        viewdirs = directions / torch.linalg.norm(
-            directions, dim=-1, keepdims=True
-        )
-        viewdirs = torch.reshape(viewdirs, (-1, height, width, 3))  # [b,h,w,3]
-        return origins, viewdirs
-
     def render(self):
-        for data in tqdm(self.dataloader):        
-            c2w = data["c2w"]
-            bs = c2w.shape[0]
-            cam_ext = torch.inverse(c2w)[:, :3]  # [b,3,4]
-            cam_int = data["intrinsic_rel"]  # [b,3,3]
-            faces = self.faces.repeat(bs, 1, 1)  # [b,v,3]
-            vertices = self.vertices.repeat(bs, 1, 1)  # [b,v,3]
-            uv = self.uv.repeat(bs, 1, 1)  # [b,v,2]
-            # mask = torch.ones_like(uv[..., :1])  # [b,v,1]
-            img_name = os.path.splitext(data["img_name"][0])[0]
+        with torch.inference_mode():
+            for data in tqdm(self.dataloader):
+                c2w = data["c2w"].to(self.device, non_blocking=True)
+                cam_int = data["intrinsic_rel"].to(self.device, non_blocking=True)
+                img_names = data["img_name"]
+                bs = c2w.shape[0]
 
-            origins, _ = self.compute_rays(data)
-            viewdir = origins - vertices
-            mask = torch.sum(viewdir * self.vert_normal, dim=-1, keepdim=True)
-            mask = (mask > 0).float()
+                cam_ext = torch.inverse(c2w)[:, :3]  # [b,3,4]
+                faces = self.faces.expand(bs, -1, -1)
+                vertices = self.vertices.expand(bs, -1, -1)
+                uv = self.uv.expand(bs, -1, -1)
 
-            attrs = torch.cat([uv, mask], dim=-1)  # [b,v,c]
-            mesh_dict = {
-                "faces": faces,
-                "vertice": vertices,
-                "attributes": attrs,
-                "size": (self.HEIGHT, self.WIDTH),
-            }
-            attr_img, uv_da = self.mesh_renderer_pt3d.render_mesh(mesh_dict, cam_int, cam_ext)  # [b,2,h,w] [b,h,w,1]
-            # compute img space attrs
-            uv_img = attr_img[:, :2]  # [b,2,h,w]
-            mask_img = attr_img[:, 2:3]
+                origins = c2w[:, :3, -1]
+                viewdir = origins[:, None, :] - vertices
+                mask = torch.sum(viewdir * self.vert_normal[None, ...], dim=-1, keepdim=True)
+                mask = (mask > 0).float()
 
-            uv_img_vis = mask_img * (uv_img + 1) / 2
-            uv_img_vis = torch.cat([uv_img_vis, torch.zeros_like(mask_img)], dim=1)
-            save_image(mask_img, os.path.join(self.save_mask_root, "%s.png" % img_name))
-            save_image(uv_img_vis, os.path.join(self.save_vis_root, "%s.jpg" % img_name))
-            torch.save(uv_img, os.path.join(self.save_root, "%s.pkl" % img_name))
+                attrs = torch.cat([uv, mask], dim=-1)
+                mesh_dict = {
+                    "faces": faces,
+                    "vertice": vertices,
+                    "attributes": attrs,
+                    "size": (self.HEIGHT, self.WIDTH),
+                }
+                attr_img, _ = self.mesh_renderer_pt3d.render_mesh(mesh_dict, cam_int, cam_ext)
+                uv_img = attr_img[:, :2]
+                mask_img = attr_img[:, 2:3]
 
-            # pho_mask is just mask_img for full UV unwrapped model
-            save_image(mask_img, os.path.join(self.save_pho_mask_root, "%s.png" % img_name))
+                uv_img_cpu = uv_img.cpu().half()
+                mask_img_cpu = mask_img.cpu()
+                uv_img_vis_cpu = None
+                if self.save_vis_root is not None:
+                    uv_img_vis = mask_img * (uv_img + 1) / 2
+                    uv_img_vis = torch.cat([uv_img_vis, torch.zeros_like(mask_img)], dim=1)
+                    uv_img_vis_cpu = uv_img_vis.cpu()
+
+                for b_idx, raw_name in enumerate(img_names):
+                    img_name = os.path.splitext(raw_name)[0]
+                    mask_np = (mask_img_cpu[b_idx, 0].numpy() * 255.0).round().astype(np.uint8)
+                    cv2.imwrite(os.path.join(self.save_mask_root, f"{img_name}.png"), mask_np)
+                    torch.save(uv_img_cpu[b_idx:b_idx + 1], os.path.join(self.save_root, f"{img_name}.pkl"))
+                    if uv_img_vis_cpu is not None:
+                        save_image(uv_img_vis_cpu[b_idx], os.path.join(self.save_vis_root, f"{img_name}.jpg"))
+                    if self.save_pho_mask_root is not None:
+                        cv2.imwrite(os.path.join(self.save_pho_mask_root, f"{img_name}.png"), mask_np)
 
 
 if __name__ == "__main__":

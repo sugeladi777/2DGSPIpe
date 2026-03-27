@@ -29,14 +29,20 @@ class MeshRenderer:
         ############
         # render
         mesh = Meshes(vertice_ndc, faces)
-        pix_to_face, _, bary_coords, _ = rasterize_meshes(mesh, (h, w), faces_per_pixel=1, blur_radius=0, bin_size=0)  # [b,h,w,1] [b,h,w,1,3]
+        pix_to_face, _, bary_coords, _ = rasterize_meshes(
+            mesh,
+            (h, w),
+            faces_per_pixel=1,
+            blur_radius=0,
+            bin_size=None,
+        )  # [b,h,w,1] [b,h,w,1,3]
 
         # mask = pix_to_face > -1
         # save_image(mask.float().permute(0, 3, 1, 2), "pix_to_face.png")
 
         b, nf, _ = faces.size()
         c = attributes.shape[-1]
-        faces = faces.reshape(b, nf * 3, 1).repeat(1, 1, c)  # [b,3f,4]
+        faces = faces.reshape(b, nf * 3, 1).expand(-1, -1, c)  # [b,3f,4]
         face_attributes = torch.gather(attributes, dim=1, index=faces)  # [b,3f,4]
         face_attributes = face_attributes.reshape(b * nf, 3, c)  # in pytorch3d, the index of mesh#2's first vertex is set to nface
         output = interpolate_face_attributes(pix_to_face, bary_coords, face_attributes)
@@ -87,14 +93,21 @@ class MeshRenderer:
         ############
         # render
         mesh = Meshes(vertice_ndc, faces)
-        pix_to_face, _, bary_coords, _ = rasterize_meshes(mesh, (h, w), faces_per_pixel=1, blur_radius=0, bin_size=0, cull_backfaces=True)  # [b,h,w,1] [b,h,w,1,3]
+        pix_to_face, _, bary_coords, _ = rasterize_meshes(
+            mesh,
+            (h, w),
+            faces_per_pixel=1,
+            blur_radius=0,
+            bin_size=None,
+            cull_backfaces=True,
+        )  # [b,h,w,1] [b,h,w,1,3]
 
         # mask = pix_to_face > -1
         # save_image(mask.float().permute(0, 3, 1, 2), "pix_to_face.png")
 
         b, nf, _ = faces.size()
         c = attributes.shape[-1]
-        faces = faces.reshape(b, nf * 3, 1).repeat(1, 1, c)  # [b,3f,4]
+        faces = faces.reshape(b, nf * 3, 1).expand(-1, -1, c)  # [b,3f,4]
         face_attributes = torch.gather(attributes, dim=1, index=faces)  # [b,3f,4]
         face_attributes = face_attributes.reshape(b * nf, 3, c)  # in pytorch3d, the index of mesh#2's first vertex is set to nface
         output = interpolate_face_attributes(pix_to_face, bary_coords, face_attributes)
