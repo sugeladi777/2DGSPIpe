@@ -5,7 +5,7 @@ import sys
 from typing import Iterable, List, Optional
 
 
-DEFAULT_GS_ITERATIONS = 8000
+DEFAULT_GS_ITERATIONS = 10000
 DEFAULT_GS_MESH_RES = 768
 
 
@@ -24,8 +24,6 @@ def build_gs_train_cmd(
     port: int,
     iterations: int,
 ) -> List[str]:
-    # Keep the original training recipe, but compress it to a faster profile
-    # that is more suitable for downstream mesh + UV + texture generation.
     densify_from_iter = clamp_int(iterations // 20, 200, 500)
     densify_until_iter = clamp_int(int(iterations * 0.75), densify_from_iter + 500, iterations)
     opacity_reset_interval = clamp_int(iterations // 4, 1000, 3000)
