@@ -3,6 +3,8 @@ A simple rasterizer
 '''
 
 
+import warnings
+
 import torch
 import torch.nn.functional as F
 from pytorch3d.renderer.mesh import rasterize_meshes
@@ -13,6 +15,59 @@ from pytorch3d.ops import interpolate_face_attributes
 class MeshRenderer:
     def __init__(self, device):
         self.device = device
+        self.force_naive_rasterization = False
+        self._overflow_warning_text = "Bin size was too small in the coarse rasterization phase"
+
+    def _rasterize_meshes_safe(
+        self,
+        mesh,
+        image_size,
+        *,
+        faces_per_pixel=1,
+        blur_radius=0.0,
+        cull_backfaces=False,
+    ):
+        kwargs = {
+            "faces_per_pixel": faces_per_pixel,
+            "blur_radius": blur_radius,
+            "cull_backfaces": cull_backfaces,
+        }
+
+        if self.force_naive_rasterization:
+            return rasterize_meshes(
+                mesh,
+                image_size,
+                bin_size=0,
+                **kwargs,
+            )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            outputs = rasterize_meshes(
+                mesh,
+                image_size,
+                bin_size=None,
+                **kwargs,
+            )
+
+        overflowed = any(
+            self._overflow_warning_text in str(w.message)
+            for w in caught
+        )
+        if not overflowed:
+            return outputs
+
+        self.force_naive_rasterization = True
+        print(
+            "[MeshRenderer] Detected PyTorch3D coarse rasterization overflow; "
+            "switching to naive rasterization (bin_size=0)."
+        )
+        return rasterize_meshes(
+            mesh,
+            image_size,
+            bin_size=0,
+            **kwargs,
+        )
     
     def render_ndc(self, mesh_dict):
         vertice_ndc = mesh_dict["vertice"]  # [b,h*w,3]
@@ -29,12 +84,11 @@ class MeshRenderer:
         ############
         # render
         mesh = Meshes(vertice_ndc, faces)
-        pix_to_face, _, bary_coords, _ = rasterize_meshes(
+        pix_to_face, _, bary_coords, _ = self._rasterize_meshes_safe(
             mesh,
             (h, w),
             faces_per_pixel=1,
             blur_radius=0,
-            bin_size=None,
         )  # [b,h,w,1] [b,h,w,1,3]
 
         # mask = pix_to_face > -1
@@ -93,12 +147,11 @@ class MeshRenderer:
         ############
         # render
         mesh = Meshes(vertice_ndc, faces)
-        pix_to_face, _, bary_coords, _ = rasterize_meshes(
+        pix_to_face, _, bary_coords, _ = self._rasterize_meshes_safe(
             mesh,
             (h, w),
             faces_per_pixel=1,
             blur_radius=0,
-            bin_size=None,
             cull_backfaces=True,
         )  # [b,h,w,1] [b,h,w,1,3]
 

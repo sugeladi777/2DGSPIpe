@@ -3,7 +3,7 @@ import datetime
 import os
 import subprocess
 import sys
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 
 def parse_modules(func_arg: str) -> List[str]:
@@ -44,11 +44,55 @@ def run_step(
     write_log(log_path, f"[Module: {module_name}] runtime: {m_end - m_start}")
 
 
+def probe_video_resolution(video_path: str) -> Tuple[int, int]:
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            video_path,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    width_text, height_text = result.stdout.strip().split("x")
+    return int(width_text), int(height_text)
+
+
+def resolve_video_ds_ratio(video_path: str, manual_ratio: float, video_max_side: int) -> Tuple[float, int, int]:
+    width, height = probe_video_resolution(video_path)
+    if manual_ratio > 0:
+        return manual_ratio, width, height
+
+    long_side = max(width, height)
+    if long_side <= video_max_side:
+        return 1.0, width, height
+    return video_max_side / float(long_side), width, height
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--video_path", type=str, help="输入视频路径")
     parser.add_argument("--video_step_size", default=10, type=int, help="帧提取间隔（每隔 N 帧取一帧）")
-    parser.add_argument("--video_ds_ratio", default=0.5, type=float, help="视频下采样比例")
+    parser.add_argument(
+        "--video_ds_ratio",
+        default=0.0,
+        type=float,
+        help="视频下采样比例；<=0 时自动按 `video_max_side` 决定是否下采样",
+    )
+    parser.add_argument(
+        "--video_max_side",
+        default=1280,
+        type=int,
+        help="自动下采样时允许的最长边分辨率",
+    )
     parser.add_argument("--reg_close_eye", type=int, default=0, help="是否使用闭眼模板（当前版本未启用）")
     parser.add_argument("--save_root", type=str, required=True, help="结果保存根目录")
     parser.add_argument("--func", type=str, default="extract-mat-face-recon-uv-tex", help="执行模块")
@@ -78,10 +122,23 @@ def main() -> None:
         if "extract" in modules:
             os.makedirs(raw_frame_root, exist_ok=True)
             output_pattern = os.path.join(raw_frame_root, "%05d.png")
-            vf_expr = (
-                f"select=not(mod(n\\,{opt.video_step_size})),"
-                f"scale=iw*{opt.video_ds_ratio}:ih*{opt.video_ds_ratio},setsar=1:1"
+            ds_ratio, video_width, video_height = resolve_video_ds_ratio(
+                opt.video_path,
+                manual_ratio=opt.video_ds_ratio,
+                video_max_side=opt.video_max_side,
             )
+            write_log(
+                log_path,
+                (
+                    f"[Module: extract] video_resolution={video_width}x{video_height}, "
+                    f"ds_ratio={ds_ratio:.4f}, video_max_side={opt.video_max_side}"
+                ),
+            )
+            vf_parts = [f"select=not(mod(n\\,{opt.video_step_size}))"]
+            if ds_ratio < 0.999:
+                vf_parts.append(f"scale=iw*{ds_ratio}:ih*{ds_ratio}")
+            vf_parts.append("setsar=1:1")
+            vf_expr = ",".join(vf_parts)
             run_step(
                 module_name="extract",
                 log_path=log_path,

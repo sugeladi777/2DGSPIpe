@@ -5,7 +5,17 @@ Usage:
 """
 
 import sys
+import math
 import bpy
+import bmesh
+
+
+# Keep CONFORMAL as the default unwrap method for downstream texture optimization.
+# The main control knob is seam density: too many seams fragment long hair into
+# many tiny islands and waste UV area during packing.
+SEAM_ANGLE_CANDIDATES_DEG = (50.0, 65.0, 80.0)
+MAX_SEAM_ISLANDS = 32
+UV_PACK_MARGIN = 0.004
 
 
 def _import_obj(filepath: str) -> None:
@@ -47,6 +57,74 @@ def parse_script_args(argv):
     return script_args[0], script_args[1]
 
 
+def _clear_seams(bm: bmesh.types.BMesh) -> None:
+    for edge in bm.edges:
+        edge.seam = False
+
+
+def _mark_structural_seams(bm: bmesh.types.BMesh, sharp_angle_deg: float) -> None:
+    sharp_angle_rad = math.radians(sharp_angle_deg)
+    for edge in bm.edges:
+        # Keep topological boundaries split.
+        if edge.is_boundary or not edge.is_manifold:
+            edge.seam = True
+            continue
+
+        # Treat unsupported connectivity conservatively.
+        if len(edge.link_faces) != 2:
+            edge.seam = True
+            continue
+
+        try:
+            face_angle = edge.calc_face_angle()
+        except ValueError:
+            edge.seam = True
+            continue
+
+        # Only cut genuinely sharp folds. Smooth hair/face regions stay connected.
+        edge.seam = face_angle >= sharp_angle_rad
+
+
+def _count_seam_islands(bm: bmesh.types.BMesh) -> int:
+    visited = set()
+    island_count = 0
+
+    for face in bm.faces:
+        if face.index in visited:
+            continue
+        island_count += 1
+        stack = [face]
+        visited.add(face.index)
+
+        while stack:
+            cur_face = stack.pop()
+            for edge in cur_face.edges:
+                if edge.seam:
+                    continue
+                for linked_face in edge.link_faces:
+                    if linked_face.index in visited:
+                        continue
+                    visited.add(linked_face.index)
+                    stack.append(linked_face)
+
+    return island_count
+
+
+def _choose_adaptive_seams(bm: bmesh.types.BMesh) -> tuple[float, int]:
+    chosen_angle = SEAM_ANGLE_CANDIDATES_DEG[-1]
+    island_count = 0
+
+    for sharp_angle_deg in SEAM_ANGLE_CANDIDATES_DEG:
+        _clear_seams(bm)
+        _mark_structural_seams(bm, sharp_angle_deg)
+        island_count = _count_seam_islands(bm)
+        chosen_angle = sharp_angle_deg
+        if island_count <= MAX_SEAM_ISLANDS:
+            break
+
+    return chosen_angle, island_count
+
+
 def export_uv(in_mesh_fpath: str, out_mesh_fpath: str) -> None:
     if not in_mesh_fpath.endswith(".obj"):
         raise ValueError(f"must use .obj format: {in_mesh_fpath}")
@@ -74,13 +152,36 @@ def export_uv(in_mesh_fpath: str, out_mesh_fpath: str) -> None:
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
 
-    # UV unwrap
+    # UV unwrap with constrained seam control.
+    # We keep CONFORMAL because it preserves local structure better for later
+    # texture optimization, but aggressively limit seam fragmentation.
     bpy.ops.object.mode_set(mode="EDIT")
+
+    bm = bmesh.from_edit_mesh(obj.data)
+    bm.faces.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    chosen_angle_deg, island_count = _choose_adaptive_seams(bm)
+    bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+
+    print(
+        "[UV] unwrap=CONFORMAL, sharp_angle=%.1f deg, seam_islands=%d"
+        % (chosen_angle_deg, island_count)
+    )
+    if island_count > MAX_SEAM_ISLANDS:
+        print(
+            "[UV] warning: seam island count (%d) is still high; packing may be less efficient."
+            % island_count
+        )
+
     bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.unwrap(method="CONFORMAL")
-    # Improve area distribution to reduce "large surface -> tiny UV island" issue
+    bpy.ops.uv.unwrap(method="CONFORMAL", fill_holes=True)
+
+    # Make texel density more uniform before packing.
     bpy.ops.uv.average_islands_scale()
-    bpy.ops.uv.pack_islands(rotate=True, margin=0.003)
+
+    # Use a tight packing margin; a large margin wastes UV area on fragmented hair.
+    bpy.ops.uv.pack_islands(rotate=True, margin=UV_PACK_MARGIN)
+
     bpy.ops.object.mode_set(mode="OBJECT")
 
     bpy.ops.object.select_all(action="DESELECT")

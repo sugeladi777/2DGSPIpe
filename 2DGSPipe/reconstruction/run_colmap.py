@@ -11,7 +11,7 @@ def run_cmd(cmd: Iterable[str]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", type=str, required=True)
-    parser.add_argument("--matcher", type=str, default="sequential", choices=["sequential", "exhaustive"])
+    parser.add_argument("--matcher", type=str, default="exhaustive", choices=["sequential", "exhaustive"])
     parser.add_argument("--sequential_overlap", type=int, default=10)
     parser.add_argument("--sequential_quadratic_overlap", type=int, default=1)
     args = parser.parse_args()
