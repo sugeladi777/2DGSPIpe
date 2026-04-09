@@ -11,6 +11,7 @@ parser.add_argument('--data_root', type=str, required=True)
 parser.add_argument('--lr', type=float, default=0.005)
 parser.add_argument('--total_iter', type=int, default=151)
 parser.add_argument('--val_ratio', type=float, default=0.125)
+parser.add_argument('--holdout_names', nargs='*', default=None)
 parser.add_argument('--weight_loss_tau', type=float, default=30.0)
 parser.add_argument('--rgb_loss_weight', type=float, default=1.0)
 parser.add_argument('--grad_loss_weight', type=float, default=5.0)
@@ -72,12 +73,35 @@ def compute_vertex_visibility_o3d(o3d_scene, point, uv_vertices):
     return intersection_counts.numpy()
 
 
-def split_holdout_frames(frames, val_ratio):
+def split_holdout_frames(frames, val_ratio, holdout_names=None):
+    if holdout_names:
+        holdout_set = {
+            os.path.basename(name)
+            for name in holdout_names
+            if str(name).strip()
+        }
+        if not holdout_set:
+            raise ValueError("--holdout_names is empty after normalization.")
+        train_frames = []
+        val_frames = []
+        for frame in frames:
+            frame_name = os.path.basename(frame["file_path"])
+            if frame_name in holdout_set:
+                val_frames.append(frame)
+            else:
+                train_frames.append(frame)
+        if not train_frames or not val_frames:
+            raise RuntimeError("Explicit holdout split must leave non-empty train and val sets.")
+        return train_frames, val_frames
+
     if not 0.0 < val_ratio < 1.0:
         raise ValueError("--val_ratio must be in (0, 1)")
     total = len(frames)
     if total < 2:
-        raise RuntimeError("Need at least 2 frames to build a true holdout split.")
+        if total == 1:
+            print("[Holdout] warning: only 1 frame available; reuse it for both train and val.")
+            return list(frames), list(frames)
+        raise RuntimeError("No frames available to build a holdout split.")
 
     interval = max(1, int(round(1.0 / val_ratio)))
     offset = min(total - 1, interval // 2)
@@ -193,7 +217,7 @@ class MetaShapeDataset(Dataset):
         
         # split dataset
         all_frames = sorted(meta["frames"], key=lambda d: d['file_path'])
-        train_frames, val_frames = split_holdout_frames(all_frames, opt.val_ratio)
+        train_frames, val_frames = split_holdout_frames(all_frames, opt.val_ratio, opt.holdout_names)
         if mode in ["val"]:
             frames = val_frames
         else:
@@ -318,10 +342,25 @@ class DiffusionSampler:
 
         self.loss_weight_img = self.load_or_compute_loss_weight()
         self.initialize_texture_map_from_views(train_data)
+        self.save_holdout_manifest(train_data, val_data)
         print(
             "[Holdout] train=%d, val=%d, val_ratio=%.3f"
             % (self.train_frame_count, self.val_frame_count, opt.val_ratio)
         )
+
+    def save_holdout_manifest(self, train_data, val_data):
+        manifest = {
+            "val_ratio": opt.val_ratio,
+            "explicit_holdout_names": [
+                os.path.basename(name) for name in (opt.holdout_names or [])
+            ],
+            "train_frame_names": list(train_data.img_name_list),
+            "val_frame_names": list(val_data.img_name_list),
+        }
+        manifest_path = os.path.join(opt.data_root, "holdout_selection.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        print(f"[Holdout] manifest: {manifest_path}")
 
     def weighted_l1_loss(self, pred, target, weight):
         weight = weight.expand_as(pred)
@@ -489,9 +528,18 @@ class DiffusionSampler:
     def _build_loss_weight_cache_path(self):
         tau_str = str(self.weight_loss_tau).replace(".", "p")
         val_ratio_str = str(opt.val_ratio).replace(".", "p")
+        holdout_token = ""
+        if opt.holdout_names:
+            normalized = sorted(
+                os.path.splitext(os.path.basename(name))[0]
+                for name in opt.holdout_names
+                if str(name).strip()
+            )
+            if normalized:
+                holdout_token = "_holdoutsel" + "-".join(normalized)
         return os.path.join(
             opt.data_root,
-            f"loss_weight_tau{tau_str}_train{self.train_frame_count}_holdout{val_ratio_str}_uv{self.uv_reso_h}x{self.uv_reso_w}.pt",
+            f"loss_weight_tau{tau_str}_train{self.train_frame_count}_holdout{val_ratio_str}{holdout_token}_uv{self.uv_reso_h}x{self.uv_reso_w}.pt",
         )
 
     def _move_batch_to_device(self, data, keys=None):

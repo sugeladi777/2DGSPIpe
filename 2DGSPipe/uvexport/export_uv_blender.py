@@ -10,9 +10,7 @@ import bpy
 import bmesh
 
 
-# Keep CONFORMAL as the default unwrap method for downstream texture optimization.
-# The main control knob is seam density: too many seams fragment long hair into
-# many tiny islands and waste UV area during packing.
+# Keep CONFORMAL as the only unwrap method for downstream texture optimization.
 SEAM_ANGLE_CANDIDATES_DEG = (50.0, 65.0, 80.0)
 MAX_SEAM_ISLANDS = 32
 UV_PACK_MARGIN = 0.004
@@ -125,6 +123,13 @@ def _choose_adaptive_seams(bm: bmesh.types.BMesh) -> tuple[float, int]:
     return chosen_angle, island_count
 
 
+def _apply_conformal_unwrap() -> None:
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.unwrap(method="CONFORMAL", fill_holes=True)
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.uv.pack_islands(rotate=True, margin=UV_PACK_MARGIN)
+
+
 def export_uv(in_mesh_fpath: str, out_mesh_fpath: str) -> None:
     if not in_mesh_fpath.endswith(".obj"):
         raise ValueError(f"must use .obj format: {in_mesh_fpath}")
@@ -153,8 +158,6 @@ def export_uv(in_mesh_fpath: str, out_mesh_fpath: str) -> None:
     bpy.context.view_layer.objects.active = obj
 
     # UV unwrap with constrained seam control.
-    # We keep CONFORMAL because it preserves local structure better for later
-    # texture optimization, but aggressively limit seam fragmentation.
     bpy.ops.object.mode_set(mode="EDIT")
 
     bm = bmesh.from_edit_mesh(obj.data)
@@ -162,6 +165,8 @@ def export_uv(in_mesh_fpath: str, out_mesh_fpath: str) -> None:
     bm.edges.ensure_lookup_table()
     chosen_angle_deg, island_count = _choose_adaptive_seams(bm)
     bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+
+    _apply_conformal_unwrap()
 
     print(
         "[UV] unwrap=CONFORMAL, sharp_angle=%.1f deg, seam_islands=%d"
@@ -172,15 +177,6 @@ def export_uv(in_mesh_fpath: str, out_mesh_fpath: str) -> None:
             "[UV] warning: seam island count (%d) is still high; packing may be less efficient."
             % island_count
         )
-
-    bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.unwrap(method="CONFORMAL", fill_holes=True)
-
-    # Make texel density more uniform before packing.
-    bpy.ops.uv.average_islands_scale()
-
-    # Use a tight packing margin; a large margin wastes UV area on fragmented hair.
-    bpy.ops.uv.pack_islands(rotate=True, margin=UV_PACK_MARGIN)
 
     bpy.ops.object.mode_set(mode="OBJECT")
 

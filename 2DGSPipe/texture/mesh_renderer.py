@@ -3,6 +3,7 @@ A simple rasterizer
 '''
 
 
+import os
 import warnings
 
 import torch
@@ -15,7 +16,9 @@ from pytorch3d.ops import interpolate_face_attributes
 class MeshRenderer:
     def __init__(self, device):
         self.device = device
-        self.force_naive_rasterization = False
+        # PyTorch3D coarse rasterization may overflow on dense face meshes.
+        # Default to the stable naive path unless the caller explicitly disables it.
+        self.force_naive_rasterization = os.environ.get("RGB_RECON_FORCE_NAIVE_RASTERIZATION", "1") == "1"
         self._overflow_warning_text = "Bin size was too small in the coarse rasterization phase"
 
     def _rasterize_meshes_safe(

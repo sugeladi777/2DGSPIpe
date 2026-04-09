@@ -77,13 +77,22 @@ def resolve_video_ds_ratio(video_path: str, manual_ratio: float, video_max_side:
     return video_max_side / float(long_side), width, height
 
 
+def clear_generated_images(root: str) -> None:
+    if not os.path.isdir(root):
+        return
+    for name in os.listdir(root):
+        lower_name = name.lower()
+        if lower_name.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff")):
+            os.remove(os.path.join(root, name))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--video_path", type=str, help="输入视频路径")
-    parser.add_argument("--video_step_size", default=10, type=int, help="帧提取间隔（每隔 N 帧取一帧）")
+    parser.add_argument("--candidate_step_size", default=10, type=int, help="自适应抽帧的候选帧步长")
     parser.add_argument(
         "--video_ds_ratio",
-        default=0.0,
+        default=0.5,
         type=float,
         help="视频下采样比例；<=0 时自动按 `video_max_side` 决定是否下采样",
     )
@@ -93,7 +102,6 @@ def main() -> None:
         type=int,
         help="自动下采样时允许的最长边分辨率",
     )
-    parser.add_argument("--reg_close_eye", type=int, default=0, help="是否使用闭眼模板（当前版本未启用）")
     parser.add_argument("--save_root", type=str, required=True, help="结果保存根目录")
     parser.add_argument("--func", type=str, default="extract-mat-face-recon-uv-tex", help="执行模块")
     opt = parser.parse_args()
@@ -121,7 +129,7 @@ def main() -> None:
     try:
         if "extract" in modules:
             os.makedirs(raw_frame_root, exist_ok=True)
-            output_pattern = os.path.join(raw_frame_root, "%05d.png")
+            clear_generated_images(raw_frame_root)
             ds_ratio, video_width, video_height = resolve_video_ds_ratio(
                 opt.video_path,
                 manual_ratio=opt.video_ds_ratio,
@@ -134,29 +142,21 @@ def main() -> None:
                     f"ds_ratio={ds_ratio:.4f}, video_max_side={opt.video_max_side}"
                 ),
             )
-            vf_parts = [f"select=not(mod(n\\,{opt.video_step_size}))"]
-            if ds_ratio < 0.999:
-                vf_parts.append(f"scale=iw*{ds_ratio}:ih*{ds_ratio}")
-            vf_parts.append("setsar=1:1")
-            vf_expr = ",".join(vf_parts)
             run_step(
                 module_name="extract",
                 log_path=log_path,
+                cwd=os.path.join(code_root, "extract"),
                 cmd=[
-                    "ffmpeg",
-                    "-y",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-i",
+                    python_bin,
+                    "adaptive_extract.py",
+                    "--video_path",
                     opt.video_path,
-                    "-vf",
-                    vf_expr,
-                    "-vsync",
-                    "vfr",
-                    "-q:v",
-                    "1",
-                    output_pattern,
+                    "--output_root",
+                    raw_frame_root,
+                    "--candidate_step_size",
+                    str(opt.candidate_step_size),
+                    "--video_ds_ratio",
+                    str(ds_ratio),
                 ],
             )
 
