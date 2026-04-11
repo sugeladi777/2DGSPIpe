@@ -17,6 +17,9 @@ parser.add_argument('--lpips_start_iter', type=int, default=60)
 parser.add_argument('--lpips_downsample', type=int, default=512)
 parser.add_argument('--grad_use_view_weight', type=int, default=1)
 parser.add_argument('--recompute_loss_weight', action='store_true')
+parser.add_argument('--num_workers', type=int, default=8)
+parser.add_argument('--persistent_workers', type=int, default=1)
+parser.add_argument('--prefetch_factor', type=int, default=2)
 
 opt = parser.parse_args()
 
@@ -271,10 +274,37 @@ class DiffusionSampler:
         )
         self.train_frame_count = all_data.num_frames
         self.batch_size = 4
-        
-        self.dataloader = DataLoader(all_data, batch_size=self.batch_size, shuffle=True, pin_memory=self.pin_memory)
-        self.weight_dataloader = DataLoader(all_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
-        self.val_dataloader = DataLoader(all_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
+
+        num_workers = max(0, int(opt.num_workers))
+        use_persistent_workers = bool(opt.persistent_workers) and num_workers > 0
+        dl_kwargs = {
+            "num_workers": num_workers,
+            "persistent_workers": use_persistent_workers,
+        }
+        if num_workers > 0:
+            dl_kwargs["prefetch_factor"] = max(1, int(opt.prefetch_factor))
+
+        self.dataloader = DataLoader(
+            all_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            pin_memory=self.pin_memory,
+            **dl_kwargs,
+        )
+        self.weight_dataloader = DataLoader(
+            all_data,
+            batch_size=1,
+            shuffle=False,
+            pin_memory=self.pin_memory,
+            **dl_kwargs,
+        )
+        self.val_dataloader = DataLoader(
+            all_data,
+            batch_size=1,
+            shuffle=False,
+            pin_memory=self.pin_memory,
+            **dl_kwargs,
+        )
 
         self.HEIGHT = all_data.HEIGHT  # image height
         self.WIDTH = all_data.WIDTH  # image width

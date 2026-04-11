@@ -20,6 +20,9 @@ parser.add_argument('--data_root', type=str, required=True)
 parser.add_argument('--batch_size', type=int, default=4)
 parser.add_argument('--save_uv_vis', type=int, default=0)
 parser.add_argument('--save_pho_mask', type=int, default=0)
+parser.add_argument('--num_workers', type=int, default=8)
+parser.add_argument('--persistent_workers', type=int, default=1)
+parser.add_argument('--prefetch_factor', type=int, default=2)
 opt = parser.parse_args()
 
 opt.meta_file_path = os.path.join(opt.data_root, "transforms.json")
@@ -109,7 +112,21 @@ class DiffusionSampler:
         train_data = MetaShapeDataset(
             meta_file_path=opt.meta_file_path, mode="train",
         )
-        self.dataloader = DataLoader(train_data, batch_size=opt.batch_size, shuffle=False, pin_memory=self.pin_memory)
+        num_workers = max(0, int(opt.num_workers))
+        use_persistent_workers = bool(opt.persistent_workers) and num_workers > 0
+        dl_kwargs = {
+            "num_workers": num_workers,
+            "persistent_workers": use_persistent_workers,
+        }
+        if num_workers > 0:
+            dl_kwargs["prefetch_factor"] = max(1, int(opt.prefetch_factor))
+        self.dataloader = DataLoader(
+            train_data,
+            batch_size=opt.batch_size,
+            shuffle=False,
+            pin_memory=self.pin_memory,
+            **dl_kwargs,
+        )
         self._load_geometry(os.path.join(opt.data_root, "final_hack.obj"))
 
         self.HEIGHT = train_data.HEIGHT
