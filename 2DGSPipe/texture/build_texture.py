@@ -2,22 +2,19 @@ import os
 import argparse
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--device', type=str, default="0")
+parser.add_argument('--device', type=str, default="inherit")
 parser.add_argument('--img_name', type=str, default="image")
-parser.add_argument('--num_view', type=int, default=16)
 parser.add_argument('--syn', type=int, default=1)
 parser.add_argument('--vis_freq', type=int, default=50)
 parser.add_argument('--data_root', type=str, required=True)
-parser.add_argument('--lr', type=float, default=0.005)
+parser.add_argument('--lr', type=float, default=0.003)
 parser.add_argument('--total_iter', type=int, default=151)
-parser.add_argument('--val_ratio', type=float, default=0.125)
-parser.add_argument('--holdout_names', nargs='*', default=None)
 parser.add_argument('--weight_loss_tau', type=float, default=30.0)
 parser.add_argument('--rgb_loss_weight', type=float, default=1.0)
 parser.add_argument('--grad_loss_weight', type=float, default=5.0)
 parser.add_argument('--lpips_loss_weight', type=float, default=0.05)
-parser.add_argument('--lpips_start_iter', type=int, default=80)
-parser.add_argument('--lpips_downsample', type=int, default=256)
+parser.add_argument('--lpips_start_iter', type=int, default=60)
+parser.add_argument('--lpips_downsample', type=int, default=512)
 parser.add_argument('--grad_use_view_weight', type=int, default=1)
 parser.add_argument('--recompute_loss_weight', action='store_true')
 
@@ -25,7 +22,16 @@ opt = parser.parse_args()
 
 opt.meta_file_path = os.path.join(opt.data_root, "transforms.json")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = opt.device
+# Keep upstream GPU policy by default (e.g. 2DGSPipe/run.py --gpu auto).
+# Only override CUDA_VISIBLE_DEVICES when explicitly requested.
+_device_raw = str(opt.device).strip()
+_device_key = _device_raw.lower()
+if _device_key in {"", "inherit", "auto"}:
+    pass
+elif _device_key == "cpu":
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+else:
+    os.environ["CUDA_VISIBLE_DEVICES"] = _device_raw
 
 
 import torch
@@ -35,7 +41,6 @@ from PIL import Image
 from torchvision.utils import save_image
 from torchvision import transforms
 import numpy as np
-import math
 import json
 from tqdm import tqdm
 from torch.utils.data import Dataset
@@ -52,10 +57,10 @@ from mesh_renderer import MeshRenderer
 
 net_cfg = {
     "log2_hashmap_size": 16,
-    "finest_level": 1024,
-    "uv_reso_w": 1024,
-    "uv_reso_h": 1024,
-    "batch_size": 1048576,
+    "finest_level": 2048,
+    "uv_reso_w": 1536,
+    "uv_reso_h": 1536,
+    "batch_size": 2097152,
     "residual_scale": 0.25,
 }
 
@@ -71,52 +76,6 @@ def compute_vertex_visibility_o3d(o3d_scene, point, uv_vertices):
     # 计算交点个数
     intersection_counts = o3d_scene.count_intersections(rays)
     return intersection_counts.numpy()
-
-
-def split_holdout_frames(frames, val_ratio, holdout_names=None):
-    if holdout_names:
-        holdout_set = {
-            os.path.basename(name)
-            for name in holdout_names
-            if str(name).strip()
-        }
-        if not holdout_set:
-            raise ValueError("--holdout_names is empty after normalization.")
-        train_frames = []
-        val_frames = []
-        for frame in frames:
-            frame_name = os.path.basename(frame["file_path"])
-            if frame_name in holdout_set:
-                val_frames.append(frame)
-            else:
-                train_frames.append(frame)
-        if not train_frames or not val_frames:
-            raise RuntimeError("Explicit holdout split must leave non-empty train and val sets.")
-        return train_frames, val_frames
-
-    if not 0.0 < val_ratio < 1.0:
-        raise ValueError("--val_ratio must be in (0, 1)")
-    total = len(frames)
-    if total < 2:
-        if total == 1:
-            print("[Holdout] warning: only 1 frame available; reuse it for both train and val.")
-            return list(frames), list(frames)
-        raise RuntimeError("No frames available to build a holdout split.")
-
-    interval = max(1, int(round(1.0 / val_ratio)))
-    offset = min(total - 1, interval // 2)
-    val_indices = list(range(offset, total, interval))
-    if not val_indices:
-        val_indices = [total // 2]
-    if len(val_indices) >= total:
-        val_indices = [total - 1]
-
-    val_index_set = set(val_indices)
-    train_frames = [frame for idx, frame in enumerate(frames) if idx not in val_index_set]
-    val_frames = [frame for idx, frame in enumerate(frames) if idx in val_index_set]
-    if not train_frames or not val_frames:
-        raise RuntimeError("Failed to build a non-empty train/val holdout split.")
-    return train_frames, val_frames
 
 
 class UVInstantNGP(nn.Module):
@@ -191,12 +150,10 @@ def nerf_matrix_to_ngp(pose, scale=0.33):
 
 
 class MetaShapeDataset(Dataset):
-    def __init__(self, device, meta_file_path, mode="train", cache_image=True):
+    def __init__(self, device, meta_file_path):
         super().__init__()
         self.id_root = os.path.dirname(meta_file_path)
         self.device = device
-        self.mode = mode
-        self.cache_image = cache_image
 
         with open(meta_file_path, 'r') as f:
             meta = json.load(f)
@@ -215,13 +172,9 @@ class MetaShapeDataset(Dataset):
         self.intrinsic_rel[0] /= self.WIDTH
         self.intrinsic_rel[1] /= self.HEIGHT
         
-        # split dataset
+        # Texture optimization uses all available frames (no train/val split).
         all_frames = sorted(meta["frames"], key=lambda d: d['file_path'])
-        train_frames, val_frames = split_holdout_frames(all_frames, opt.val_ratio, opt.holdout_names)
-        if mode in ["val"]:
-            frames = val_frames
-        else:
-            frames = train_frames
+        frames = list(all_frames)
         self.frames = frames
         self.num_frames = len(self.frames)
 
@@ -241,11 +194,18 @@ class MetaShapeDataset(Dataset):
                 cur_pose = nerf_matrix_to_ngp(cur_pose, scale=1.)
             self.cam2world.append(cur_pose)
             img_name = os.path.basename(frames[f_id]['file_path'])
+            img_stem = os.path.splitext(img_name)[0]
             uv_img_name = "%s.pkl" % os.path.splitext(img_name)[0]
 
             img = self._load_img(os.path.join(image_dir, img_name))
             self.images.append(img)
-            mask = self._load_img(os.path.join(mask_dir, img_name))
+            mask_path_png = os.path.join(mask_dir, f"{img_stem}.png")
+            if not os.path.exists(mask_path_png):
+                raise FileNotFoundError(
+                    f"UV mask not found for frame '{img_name}': {mask_path_png}"
+                )
+            mask_path = mask_path_png
+            mask = self._load_img(mask_path)
             self.masks.append(mask[:1])
             uv = torch.load(os.path.join(uv_dir, uv_img_name), map_location="cpu")[0].float()
             self.uv_images.append(uv)
@@ -260,7 +220,7 @@ class MetaShapeDataset(Dataset):
         self.cam2world = np.stack(self.cam2world, axis=0).astype(np.float32)  # [nf,4,4]
         self.cam2world = torch.from_numpy(self.cam2world).to(self.device)  # [nf,4,4]
 
-        print("Create [%s] dataset, total [%d] frames" % (self.mode, self.num_frames))
+        print("Create dataset, total [%d] frames" % (self.num_frames))
 
     def __len__(self):
         return self.num_frames
@@ -303,26 +263,21 @@ class DiffusionSampler:
     def __init__(self, opt):
         self.device = "cuda"
         self.log_dir = os.path.join(opt.data_root, "texture", opt.img_name)
-        self.gamma = 2.2
         self.pin_memory = torch.cuda.is_available()
 
         # set dataset
-        train_data = MetaShapeDataset(
-            device="cpu", meta_file_path=opt.meta_file_path, mode="train",
+        all_data = MetaShapeDataset(
+            device="cpu", meta_file_path=opt.meta_file_path,
         )
-        val_data = MetaShapeDataset(
-            device="cpu", meta_file_path=opt.meta_file_path, mode="val",
-        )
-        self.train_frame_count = train_data.num_frames
-        self.val_frame_count = val_data.num_frames
+        self.train_frame_count = all_data.num_frames
         self.batch_size = 4
         
-        self.dataloader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True, pin_memory=self.pin_memory)
-        self.weight_dataloader = DataLoader(train_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
-        self.val_dataloader = DataLoader(val_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
+        self.dataloader = DataLoader(all_data, batch_size=self.batch_size, shuffle=True, pin_memory=self.pin_memory)
+        self.weight_dataloader = DataLoader(all_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
+        self.val_dataloader = DataLoader(all_data, batch_size=1, shuffle=False, pin_memory=self.pin_memory)
 
-        self.HEIGHT = train_data.HEIGHT  # image height
-        self.WIDTH = train_data.WIDTH  # image width
+        self.HEIGHT = all_data.HEIGHT  # image height
+        self.WIDTH = all_data.WIDTH  # image width
         self.weight_loss_tau = opt.weight_loss_tau
 
         self.uv_reso_h = net_cfg["uv_reso_h"]
@@ -341,26 +296,11 @@ class DiffusionSampler:
         self.loss_weight_cache_path = self._build_loss_weight_cache_path()
 
         self.loss_weight_img = self.load_or_compute_loss_weight()
-        self.initialize_texture_map_from_views(train_data)
-        self.save_holdout_manifest(train_data, val_data)
+        self.initialize_texture_map_from_views(all_data)
         print(
-            "[Holdout] train=%d, val=%d, val_ratio=%.3f"
-            % (self.train_frame_count, self.val_frame_count, opt.val_ratio)
+            "[Frames] using all frames for optimization: %d"
+            % (self.train_frame_count)
         )
-
-    def save_holdout_manifest(self, train_data, val_data):
-        manifest = {
-            "val_ratio": opt.val_ratio,
-            "explicit_holdout_names": [
-                os.path.basename(name) for name in (opt.holdout_names or [])
-            ],
-            "train_frame_names": list(train_data.img_name_list),
-            "val_frame_names": list(val_data.img_name_list),
-        }
-        manifest_path = os.path.join(opt.data_root, "holdout_selection.json")
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-        print(f"[Holdout] manifest: {manifest_path}")
 
     def weighted_l1_loss(self, pred, target, weight):
         weight = weight.expand_as(pred)
@@ -527,19 +467,9 @@ class DiffusionSampler:
 
     def _build_loss_weight_cache_path(self):
         tau_str = str(self.weight_loss_tau).replace(".", "p")
-        val_ratio_str = str(opt.val_ratio).replace(".", "p")
-        holdout_token = ""
-        if opt.holdout_names:
-            normalized = sorted(
-                os.path.splitext(os.path.basename(name))[0]
-                for name in opt.holdout_names
-                if str(name).strip()
-            )
-            if normalized:
-                holdout_token = "_holdoutsel" + "-".join(normalized)
         return os.path.join(
             opt.data_root,
-            f"loss_weight_tau{tau_str}_train{self.train_frame_count}_holdout{val_ratio_str}{holdout_token}_uv{self.uv_reso_h}x{self.uv_reso_w}.pt",
+            f"loss_weight_tau{tau_str}_allviews{self.train_frame_count}_uv{self.uv_reso_h}x{self.uv_reso_w}.pt",
         )
 
     def _move_batch_to_device(self, data, keys=None):
@@ -681,7 +611,7 @@ class DiffusionSampler:
         #     save_image(max_weight[i], os.path.join("workspace/weight_img_vis_erode", "%05d_weight.jpg" % i))
 
         uv_list = uv_list.permute(0, 2, 3, 1).contiguous()
-        weight_img = F.grid_sample(max_weight, uv_list)
+        weight_img = F.grid_sample(max_weight, uv_list, align_corners=True)
         return weight_img
 
     def optimize(self):
@@ -745,7 +675,6 @@ class DiffusionSampler:
                     psnr_list = []
                     ssim_list = []
                     lpips_list = []
-                    img_name_list = []
                     for data in self.val_dataloader:
                         render = self.render_in_uv(data, uv_shading_eval)
                         mask = data["mask"]
@@ -760,13 +689,11 @@ class DiffusionSampler:
                         psnr_list.append(cur_psnr)
                         ssim_list.append(cur_ssim)
                         lpips_list.append(cur_lpips)
-                        img_name_list.append(data["img_name"][0])
                     
                     render_list = torch.cat(render_list, dim=0)
                     gt_list = torch.cat(gt_list, dim=0)
                     save_image(render_list, os.path.join(cur_log_dir, "render.jpg"))
                     save_image(gt_list, os.path.join(cur_log_dir, "gt.jpg"))
-                    save_image(uv_shading_eval.permute(0, 3, 1, 2), os.path.join(cur_log_dir, "uv.png"))
                     save_image(uv_shading_eval.permute(0, 3, 1, 2), os.path.join(cur_log_dir, "uv_vis.png"))
 
                     psnr_score = sum(psnr_list) / len(psnr_list)

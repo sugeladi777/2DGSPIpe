@@ -1,0 +1,7 @@
+Source: https://github.com/google-ai-edge/mediapipe
+File: mediapipe/modules/face_geometry/data/canonical_face_model.obj
+License: Apache License 2.0
+License text: https://github.com/google-ai-edge/mediapipe/blob/master/LICENSE
+
+Note:
+This mesh is used as the realistic open-source face mesh for the web capture guide.

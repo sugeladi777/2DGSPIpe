@@ -171,7 +171,7 @@ class DiffusionSampler:
                 uv_img = attr_img[:, :2]
                 mask_img = attr_img[:, 2:3]
 
-                uv_img_cpu = uv_img.cpu().half()
+                uv_img_cpu = uv_img.cpu().float()
                 mask_img_cpu = mask_img.cpu()
                 uv_img_vis_cpu = None
                 if self.save_vis_root is not None:

@@ -31,10 +31,23 @@ def find_best_mesh_path(data_root: str) -> str:
 
 
 def to_frame_path(data_root: str, img_name: str) -> str:
+    raw_root = os.path.join(data_root, "raw_frames")
     stem_or_name = str(img_name)
-    if os.path.splitext(stem_or_name)[1]:
-        return os.path.join(data_root, "raw_frames", stem_or_name)
-    return os.path.join(data_root, "raw_frames", f"{stem_or_name}.png")
+    stem, ext = os.path.splitext(stem_or_name)
+
+    if ext:
+        exact = os.path.join(raw_root, stem_or_name)
+        if os.path.isfile(exact):
+            return exact
+        stem_or_name = stem
+
+    exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff")
+    for candidate_ext in exts:
+        candidate = os.path.join(raw_root, f"{stem_or_name}{candidate_ext}")
+        if os.path.isfile(candidate):
+            return candidate
+
+    return os.path.join(raw_root, f"{stem_or_name}.png")
 
 
 def main() -> None:

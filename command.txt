@@ -1,1 +1,0 @@
-python /home/lichengkai/RGB_Recon/2DGSPipe/batch_run.py

@@ -2,11 +2,13 @@ import argparse
 import os
 import subprocess
 import sys
-from typing import Iterable, List, Optional
+from typing import Iterable, Optional
 
 
-DEFAULT_GS_ITERATIONS = 10000
+DEFAULT_GS_ITERATIONS = 15000
 DEFAULT_GS_MESH_RES = 768
+GROUP_A_DEPTH_RATIO = 0
+GROUP_A_LAMBDA_DIST = 0
 
 
 def run_cmd(cmd: Iterable[str], cwd: Optional[str] = None) -> None:
@@ -17,16 +19,22 @@ def clamp_int(value: int, lower: int, upper: int) -> int:
     return max(lower, min(upper, value))
 
 
+def build_eval_milestones(iterations: int) -> list[str]:
+    milestones = sorted({7_000, 15_000, iterations})
+    return [str(x) for x in milestones if 1 <= x <= iterations]
+
+
 def build_gs_train_cmd(
     python_bin: str,
     data_root: str,
     recon_root: str,
     port: int,
     iterations: int,
-) -> List[str]:
+) -> list[str]:
     densify_from_iter = clamp_int(iterations // 20, 200, 500)
     densify_until_iter = clamp_int(int(iterations * 0.75), densify_from_iter + 500, iterations)
     opacity_reset_interval = clamp_int(iterations // 4, 1000, 3000)
+    eval_milestones = build_eval_milestones(iterations)
 
     return [
         python_bin,
@@ -47,10 +55,14 @@ def build_gs_train_cmd(
         str(densify_until_iter),
         "--opacity_reset_interval",
         str(opacity_reset_interval),
+        "--depth_ratio",
+        str(GROUP_A_DEPTH_RATIO),
+        "--lambda_dist",
+        str(GROUP_A_LAMBDA_DIST),
         "--test_iterations",
-        "-1",
+        *eval_milestones,
         "--save_iterations",
-        str(iterations),
+        *eval_milestones,
         "--quiet",
     ]
 
@@ -60,8 +72,8 @@ def build_gs_render_cmd(
     data_root: str,
     recon_root: str,
     mesh_res: int,
-) -> List[str]:
-    return [
+) -> list[str]:
+    cmd = [
         python_bin,
         "render.py",
         "-s",
@@ -72,13 +84,26 @@ def build_gs_render_cmd(
         "--skip_test",
         "--mesh_res",
         str(mesh_res),
+        "--depth_ratio",
+        str(GROUP_A_DEPTH_RATIO),
+        "--num_cluster",
+        "1",
         "--quiet",
     ]
+
+    return cmd
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--data_root", type=str, required=True)
+    parser.add_argument(
+        "--stage",
+        type=str,
+        choices=("all", "colmap", "2dgs"),
+        default="all",
+        help="重建阶段：all=COLMAP+2DGS，colmap=仅COLMAP，2dgs=仅2DGS",
+    )
     parser.add_argument(
         "--gs_iterations",
         type=int,
@@ -101,9 +126,17 @@ def main() -> None:
     data_root = os.path.abspath(opt.data_root)
     code_root = os.path.dirname(os.path.abspath(__file__))
     python_bin = sys.executable
+    stage = opt.stage
 
-    run_cmd([python_bin, "to_2dgs_format.py", "--data_root", data_root], cwd=code_root)
-    run_cmd([python_bin, "run_colmap.py", "--data_root", data_root], cwd=code_root)
+    if stage in ("all", "colmap"):
+        run_cmd(
+            [python_bin, "to_2dgs_format.py", "--data_root", data_root, "--no-skip-existing"],
+            cwd=code_root,
+        )
+        run_cmd([python_bin, "run_colmap.py", "--data_root", data_root], cwd=code_root)
+
+    if stage == "colmap":
+        return
 
     gs_code_root = os.path.join(code_root, "2d-gaussian-splatting")
     recon_root = os.path.join(data_root, "recon")

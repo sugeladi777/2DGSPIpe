@@ -41,7 +41,8 @@ def process_one(
     png_compression: int,
     skip_existing: bool,
 ) -> str:
-    save_path = os.path.join(save_root, name)
+    stem, _ = os.path.splitext(name)
+    save_path = os.path.join(save_root, f"{stem}.png")
     if skip_existing and os.path.isfile(save_path):
         return "skip"
 
@@ -79,8 +80,8 @@ def main() -> None:
         "--skip_existing",
         dest="skip_existing",
         action="store_true",
-        default=True,
-        help="Skip images already written in output folder (default: on)",
+        default=False,
+        help="Skip images already written in output folder (default: off)",
     )
     parser.add_argument(
         "--no-skip-existing",

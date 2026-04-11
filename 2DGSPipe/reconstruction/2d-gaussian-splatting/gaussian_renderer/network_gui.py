@@ -14,6 +14,7 @@ import traceback
 import socket
 import json
 import struct
+import errno
 from scene.cameras import MiniCam
 
 host = "127.0.0.1"
@@ -27,8 +28,23 @@ listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 def init(wish_host, wish_port):
     global host, port, listener
     host = wish_host
-    port = wish_port
-    listener.bind((host, port))
+    requested_port = int(wish_port)
+    port = requested_port
+    # Prefer requested port; if busy, fall back to an OS-assigned free port.
+    try:
+        listener.bind((host, port))
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            listener.bind((host, 0))
+            port = int(listener.getsockname()[1])
+            print(f"[network_gui] port {requested_port} in use, fallback to auto port {port}")
+        else:
+            raise
+
+    if port == 0:
+        port = int(listener.getsockname()[1])
+        print(f"[network_gui] using auto-assigned port {port}")
+
     listener.listen()
     listener.settimeout(0)
 

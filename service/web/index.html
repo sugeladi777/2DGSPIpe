@@ -1,0 +1,2732 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f5f8ff;
+      --card: #ffffff;
+      --text: #102038;
+      --muted: #5f6f86;
+      --accent: #0a6cff;
+      --ok: #0e8f4f;
+      --warn: #ce7b00;
+      --error: #b0232b;
+      --pass-cell: #dff7e9;
+      --active-cell: #dbe9ff;
+      --empty-cell: #f2f5fb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at top, #dfe8ff 0%, var(--bg) 40%, #eef3ff 100%);
+      color: var(--text);
+      padding: 16px;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 12px; }
+    .card {
+      background: var(--card);
+      border: 1px solid #dbe3f3;
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 24px rgba(9, 20, 45, 0.06);
+    }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    h2 { margin: 0 0 10px; font-size: 17px; }
+    .tips { color: var(--muted); line-height: 1.6; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    label { font-size: 13px; color: var(--muted); }
+    input, button {
+      border-radius: 10px;
+      border: 1px solid #cbd7ee;
+      padding: 8px 10px;
+      font-size: 14px;
+      background: #fff;
+    }
+    input[type="radio"] {
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      accent-color: var(--accent);
+      background: transparent;
+    }
+    button {
+      cursor: pointer;
+      border-color: var(--accent);
+      color: #fff;
+      background: linear-gradient(180deg, #1e7aff, #0a6cff);
+    }
+    button[disabled] {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #10151f;
+      border: 1px solid #2f3d58;
+    }
+    .stage-wrap {
+      display: grid;
+      grid-template-columns: 1.45fr 1fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+    .mode-panel {
+      margin-top: 8px;
+      margin-bottom: 10px;
+      border: 1px solid #d9e5fb;
+      background: #f7faff;
+      border-radius: 10px;
+      padding: 10px;
+    }
+    .mode-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 6px;
+    }
+    .mode-option {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 13px;
+      color: #233a63;
+      line-height: 1.45;
+      cursor: pointer;
+    }
+    .mode-desc {
+      margin-top: 7px;
+      font-size: 12px;
+      color: #4f6180;
+      line-height: 1.5;
+    }
+    video {
+      width: 100%;
+      max-height: 620px;
+      display: block;
+      background: #10151f;
+    }
+    video.mirrored,
+    #overlay.mirrored {
+      transform: scaleX(-1);
+      transform-origin: center;
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .camera-hint {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      max-width: calc(100% - 20px);
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+      border: 1px solid #d7e2f6;
+      background: rgba(250, 252, 255, 0.92);
+      color: #233a63;
+      box-shadow: 0 4px 14px rgba(21, 42, 83, 0.14);
+      backdrop-filter: blur(2px);
+    }
+    .camera-hint.ok {
+      border-color: #a9dfbf;
+      background: rgba(235, 251, 242, 0.95);
+      color: #17633d;
+    }
+    .camera-hint.warn {
+      border-color: #f0d6ab;
+      background: rgba(255, 248, 233, 0.95);
+      color: #8b5700;
+    }
+    .camera-hint.error {
+      border-color: #f2c5cb;
+      background: rgba(255, 241, 243, 0.95);
+      color: #8f2630;
+    }
+    .guide-wrap {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+      grid-template-columns: 1.2fr 1fr;
+    }
+    .guide-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(140px, 1fr));
+      gap: 6px;
+      font-size: 13px;
+    }
+    .metric {
+      background: #f3f7ff;
+      border: 1px solid #d9e5fb;
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+    .guide-msg {
+      font-size: 14px;
+      font-weight: 600;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #d9e5fb;
+      background: #f8fbff;
+    }
+    .guide-msg.ok { color: var(--ok); border-color: #b6e5ca; background: #ebfbf2; }
+    .guide-msg.warn { color: var(--warn); border-color: #f1ddb3; background: #fff8ea; }
+    .guide-msg.error { color: var(--error); border-color: #f3c4c7; background: #fff0f1; }
+    .guide-grid {
+      display: grid;
+      gap: 4px;
+      align-content: start;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .mesh-panel {
+      margin-bottom: 8px;
+      padding: 8px;
+      border: 1px solid #d9e5fb;
+      border-radius: 10px;
+      background: #f7faff;
+    }
+    .stage-mesh-panel {
+      margin-bottom: 0;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #virtualMesh {
+      width: 100%;
+      height: 340px;
+      display: block;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #eef4ff 0%, #f8fbff 100%);
+      border: 1px solid #cddbf6;
+    }
+    .guide-metrics.slim {
+      grid-template-columns: repeat(3, minmax(140px, 1fr));
+    }
+    .metric.secondary {
+      display: none;
+    }
+    .compact-hidden {
+      display: none !important;
+    }
+    .mesh-hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #51627d;
+      line-height: 1.4;
+      display: none;
+    }
+    .capture-list {
+      margin-top: 8px;
+      display: grid;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .capture-item {
+      font-size: 12px;
+      border: 1px solid #d9e4f8;
+      border-radius: 8px;
+      padding: 6px;
+      background: #f6f9ff;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      line-height: 1.3;
+      white-space: pre-line;
+    }
+    .capture-item.done {
+      border-color: #9fddba;
+      background: #eaf9f1;
+      color: #196a3f;
+      font-weight: 600;
+    }
+    .grid-cell {
+      border-radius: 8px;
+      padding: 8px 6px;
+      border: 1px solid #cfdbf3;
+      background: var(--empty-cell);
+      font-size: 12px;
+      text-align: center;
+      line-height: 1.3;
+      white-space: pre-line;
+    }
+    .grid-cell.active { background: var(--active-cell); border-color: #98b9f4; }
+    .grid-cell.pass { background: var(--pass-cell); border-color: #9fddba; }
+    .status { font-weight: 600; }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: var(--warn); }
+    .status.error { color: var(--error); }
+    .progress {
+      height: 10px;
+      border-radius: 10px;
+      background: #e6edfb;
+      overflow: hidden;
+    }
+    .progress > div {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #2e90ff, #66b3ff);
+      transition: width 0.25s;
+    }
+    .artifacts a { display: block; margin: 4px 0; }
+    .result-preview {
+      margin-top: 10px;
+      border: 1px solid #d9e4f8;
+      border-radius: 10px;
+      padding: 8px;
+      background: #f8fbff;
+    }
+    #resultViewer {
+      width: 100%;
+      height: 380px;
+      display: block;
+      border-radius: 8px;
+      border: 1px solid #ccd9f4;
+      background: linear-gradient(180deg, #f4f8ff 0%, #edf3ff 100%);
+      touch-action: none;
+      cursor: grab;
+    }
+    #resultViewer.dragging {
+      cursor: grabbing;
+    }
+    .result-hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #4c5f7f;
+      line-height: 1.4;
+    }
+    .result-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .result-actions a {
+      display: inline-block;
+      text-decoration: none;
+      color: #fff;
+      background: linear-gradient(180deg, #1e7aff, #0a6cff);
+      border: 1px solid #0a6cff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .stage-wrap {
+        grid-template-columns: 1fr;
+      }
+      video {
+        max-height: 56vh;
+      }
+      #virtualMesh {
+        height: 300px;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .guide-wrap {
+        grid-template-columns: 1fr;
+      }
+      .guide-metrics.slim {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+    }
+
+    @media (max-width: 560px) {
+      #virtualMesh {
+        height: 260px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="tips">
+        拍摄建议：先选择拍摄模式，再覆盖不同视角（上/中/下 3 层，每层 8 个左右视角格，共 24 格）；当前视角稳定且清晰时会自动抓拍，并为每个格子保留 Top-K 图像。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>1) 拍摄与上传</h2>
+      <div class="mode-panel">
+        <div style="font-size:13px; font-weight:600; color:#1d3357;">拍摄模式</div>
+        <div class="mode-options">
+          <label class="mode-option">
+            <input type="radio" name="captureMode" value="head_rotation">
+            <span>固定手机，转动头部</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="captureMode" value="camera_orbit" checked>
+            <span>环绕人脸移动手机</span>
+          </label>
+        </div>
+        <div id="captureModeDesc" class="mode-desc"></div>
+      </div>
+
+      <div class="stage-wrap">
+        <div class="video-wrap">
+          <video id="preview" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div id="cameraHint" class="camera-hint warn">请将人脸放入画面，系统会实时提示远近</div>
+        </div>
+        <div class="mesh-panel stage-mesh-panel">
+          <canvas id="virtualMesh"></canvas>
+          <div id="meshHint" class="mesh-hint">等待人脸检测...</div>
+        </div>
+      </div>
+
+      <div id="guideMessage" class="guide-msg warn" style="margin-top:10px;">点击“打开摄像头”后开始实时引导</div>
+      <div class="guide-metrics slim" style="margin-top:8px;">
+        <div class="metric secondary">face ratio: <span id="mFaceRatio">-</span></div>
+        <div class="metric secondary">center offset: <span id="mCenter">-</span></div>
+        <div class="metric">yaw/pitch/roll: <span id="mPose">-</span></div>
+        <div class="metric">sharpness: <span id="mSharpness">-</span></div>
+        <div class="metric">coverage: <span id="mCoverage">0/24</span></div>
+      </div>
+      <div id="guideGrid" class="guide-grid compact-hidden"></div>
+
+      <div class="row" style="margin-top:10px;">
+        <button id="openCamBtn">打开摄像头</button>
+        <button id="switchCamBtn" disabled>切换到前置</button>
+        <button id="clearCaptureBtn" disabled>清空采集</button>
+        <button id="uploadCaptureBtn" disabled>上传采集图片并重建</button>
+      </div>
+      <div class="tips compact-hidden" style="margin-top:8px;">采集进度：<span id="captureSummary">0/24</span></div>
+      <div id="captureList" class="capture-list compact-hidden"></div>
+      <div id="uploadStatus" class="tips" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>2) 任务状态</h2>
+      <div class="row">
+        <div>Job ID: <span id="jobId">-</span></div>
+        <div>状态: <span id="jobStatus" class="status">-</span></div>
+        <div>当前模块: <span id="jobModule">-</span></div>
+        <div>进度: <span id="jobPercent">0%</span></div>
+        <div>预计剩余: <span id="jobEta">-</span></div>
+      </div>
+      <div class="progress" style="margin-top:8px;"><div id="progressInner"></div></div>
+      <div class="artifacts" id="artifacts" style="margin-top:10px;"></div>
+      <div class="result-preview">
+        <canvas id="resultViewer"></canvas>
+        <div id="resultViewerHint" class="result-hint">重建完成后会在这里显示可旋转的带纹理 Mesh。</div>
+        <div id="resultQuickDownloads" class="result-actions"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="assets/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script>
+    function buildLinearBins(minValue, maxValue, count) {
+      if (count <= 1) return [minValue];
+      const out = [];
+      for (let i = 0; i < count; i += 1) {
+        const t = i / (count - 1);
+        out.push(minValue + (maxValue - minValue) * t);
+      }
+      return out;
+    }
+
+    function formatAngle(value) {
+      const rounded = Math.round(value);
+      return `${rounded >= 0 ? "+" : ""}${rounded}`;
+    }
+
+    const YAW_BIN_COUNT = 8;
+    const CANONICAL_FACE_MESH_URL = "assets/canonical_face_model.obj";
+    const GUIDE = {
+      faceRatioMin: 0.28,
+      faceRatioMax: 0.46,
+      centerOffsetMax: 0.15,
+      rollAbsMax: 20,
+      yawAbsMax: 90,
+      pitchAbsMax: 30,
+      yawBins: buildLinearBins(-90, 90, YAW_BIN_COUNT),
+      pitchBins: [20, 0, -20],
+      pitchLabels: ["上扇形", "中扇形", "下扇形"],
+      sharpnessMin: 30,
+      sharpnessSampleSize: 96,
+      minFramesPerBin: 1,
+    };
+    const UPLOAD_GATE = {
+      minShots: 40,
+      minCoverageRatio: 0.8,
+      minPerPitchShots: 6,
+    };
+    const CAPTURE_POLICY = {
+      topKPerCell: 3,
+      candidatePoolPerCell: 10,
+      minGlobalIntervalMs: 260,
+      minCellIntervalMs: 520,
+      replaceMinGain: 1.2,
+      novelReplaceMargin: 0.4,
+      maxNovelQualityDrop: 2.0,
+      minNovelPoseDist: 6.0,
+      poolDiversityWeight: 0.8,
+      selectQualityWeight: 0.72,
+      selectDiversityWeight: 0.28,
+      noveltyNormDeg: 18.0,
+    };
+    const CAPTURE_MODE_INFO = Object.freeze({
+      head_rotation: {
+        label: "固定手机，转动头部",
+        desc: "手机尽量不动，人脸缓慢转动覆盖左右与上下角度；后端 COLMAP 会使用 face_mask。",
+      },
+      camera_orbit: {
+        label: "环绕人脸移动手机",
+        desc: "人脸尽量保持自然朝前，手机围绕人脸移动采集多视角；后端 COLMAP 会使用 wholebody_mask。",
+      },
+    });
+    const DEFAULT_CAPTURE_MODE = "camera_orbit";
+
+    const preview = document.getElementById("preview");
+    const overlay = document.getElementById("overlay");
+    const overlayCtx = overlay.getContext("2d");
+    const cameraHintEl = document.getElementById("cameraHint");
+    const openCamBtn = document.getElementById("openCamBtn");
+    const switchCamBtn = document.getElementById("switchCamBtn");
+    const clearCaptureBtn = document.getElementById("clearCaptureBtn");
+    const uploadCaptureBtn = document.getElementById("uploadCaptureBtn");
+    const captureSummaryEl = document.getElementById("captureSummary");
+    const captureListEl = document.getElementById("captureList");
+    const captureModeDescEl = document.getElementById("captureModeDesc");
+    const captureModeInputs = Array.from(document.querySelectorAll('input[name="captureMode"]'));
+    const uploadStatus = document.getElementById("uploadStatus");
+
+    const jobIdEl = document.getElementById("jobId");
+    const jobStatusEl = document.getElementById("jobStatus");
+    const jobModuleEl = document.getElementById("jobModule");
+    const jobPercentEl = document.getElementById("jobPercent");
+    const jobEtaEl = document.getElementById("jobEta");
+    const progressInner = document.getElementById("progressInner");
+    const artifactsEl = document.getElementById("artifacts");
+    const resultViewerCanvas = document.getElementById("resultViewer");
+    const resultViewerHintEl = document.getElementById("resultViewerHint");
+    const resultQuickDownloadsEl = document.getElementById("resultQuickDownloads");
+
+    const guideMessageEl = document.getElementById("guideMessage");
+    const mFaceRatioEl = document.getElementById("mFaceRatio");
+    const mCenterEl = document.getElementById("mCenter");
+    const mPoseEl = document.getElementById("mPose");
+    const mSharpnessEl = document.getElementById("mSharpness");
+    const mCoverageEl = document.getElementById("mCoverage");
+    const guideGridEl = document.getElementById("guideGrid");
+    const virtualMeshCanvas = document.getElementById("virtualMesh");
+    const meshHintEl = document.getElementById("meshHint");
+    let meshRenderer = null;
+    let meshScene = null;
+    let meshCamera = null;
+    let meshGroup = null;
+    let meshTexture = null;
+    let meshTexCanvas = null;
+    let meshTexCtx = null;
+    let meshHeadReady = false;
+    let meshLoadError = "";
+    let meshDisplayLabel = "程序化头模";
+    const meshUvBounds = { uMin: 0.08, uMax: 0.92, vMin: 0.08, vMax: 0.92 };
+    const meshState = { rotX: 0, rotY: 0, rotZ: 0, scale: 1.0 };
+
+    let stream = null;
+    let imageCapture = null;
+    let preferredFacingMode = "environment";
+    let currentFacingMode = null;
+    let currentCaptureMode = DEFAULT_CAPTURE_MODE;
+    let currentJobId = null;
+    let pollTimer = null;
+    const BASE_MODULE_SECONDS = Object.freeze({
+      mat: 50,
+      face: 105,
+      recon: 230,
+      uv: 95,
+      tex: 150,
+    });
+    const MODULE_ORDER = ["mat", "face", "recon", "uv", "tex"];
+    const progressTimeState = {
+      jobId: null,
+      startedMs: 0,
+      moduleStartMs: 0,
+      lastModule: null,
+      moduleExpectedSec: { ...BASE_MODULE_SECONDS },
+    };
+
+    let faceMesh = null;
+    let analysisEnabled = false;
+    let analysisInFlight = false;
+    let analysisLoopHandle = null;
+    let lastActiveCell = null;
+    let lastMetrics = null;
+    let meshScale = 1.0;
+    let sharpnessCanvas = null;
+    let sharpnessCtx = null;
+    const cellCandidates = new Map(); // key -> Array<shot>, candidate pool per cell
+    const capturedShots = new Map(); // key -> Array<shot>, selected Top-K per cell
+    const totalCells = GUIDE.pitchBins.length * GUIDE.yawBins.length;
+    const AUTO_CAPTURE_COOLDOWN_MS = CAPTURE_POLICY.minGlobalIntervalMs;
+    let autoCaptureInFlight = false;
+    let lastAutoCaptureAt = 0;
+    const lastCellCaptureAt = new Map();
+    let captureSeq = 0;
+
+    let resultRenderer = null;
+    let resultScene = null;
+    let resultCamera = null;
+    let resultRoot = null;
+    let resultActiveMesh = null;
+    let resultAnimHandle = null;
+    const resultViewState = {
+      yaw: 0,
+      pitch: 0,
+      targetYaw: 0,
+      targetPitch: 0,
+      distance: 2.9,
+      targetDistance: 2.9,
+      dragging: false,
+      lastX: 0,
+      lastY: 0,
+    };
+
+    const coverageCounts = Array.from({ length: GUIDE.pitchBins.length }, () =>
+      Array.from({ length: GUIDE.yawBins.length }, () => 0)
+    );
+
+    function api(path) {
+      return path;
+    }
+
+    function normalizeCaptureMode(value) {
+      const mode = String(value || "").trim();
+      return Object.prototype.hasOwnProperty.call(CAPTURE_MODE_INFO, mode)
+        ? mode
+        : DEFAULT_CAPTURE_MODE;
+    }
+
+    function getCaptureModeInfo(value = currentCaptureMode) {
+      const mode = normalizeCaptureMode(value);
+      return { mode, ...CAPTURE_MODE_INFO[mode] };
+    }
+
+    function syncCaptureModeFromInputs() {
+      const selected = captureModeInputs.find((it) => it.checked)?.value;
+      currentCaptureMode = normalizeCaptureMode(selected);
+    }
+
+    function updateCaptureModeDescription() {
+      if (!captureModeDescEl) return;
+      const info = getCaptureModeInfo();
+      captureModeDescEl.textContent = `${info.label}：${info.desc}`;
+    }
+
+    function parseIsoMs(value) {
+      if (!value || typeof value !== "string") return 0;
+      const t = Date.parse(value);
+      return Number.isFinite(t) ? t : 0;
+    }
+
+    function parseEnabledModules(funcText) {
+      const items = String(funcText || "")
+        .replace(/,/g, "-")
+        .split("-")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const out = [];
+      for (const m of MODULE_ORDER) {
+        if (items.includes(m)) out.push(m);
+      }
+      return out.length ? out : MODULE_ORDER.slice();
+    }
+
+    function resetTimeProgressForJob(jobId) {
+      progressTimeState.jobId = jobId || null;
+      progressTimeState.startedMs = 0;
+      progressTimeState.moduleStartMs = 0;
+      progressTimeState.lastModule = null;
+      progressTimeState.moduleExpectedSec = { ...BASE_MODULE_SECONDS };
+    }
+
+    function formatEta(seconds) {
+      if (!Number.isFinite(seconds) || seconds < 0) return "-";
+      const sec = Math.max(0, Math.round(seconds));
+      if (sec < 60) return `${sec}秒`;
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return `${h}小时${m}分`;
+      return `${m}分${s}秒`;
+    }
+
+    function computeTimeProgress(job, status, progress) {
+      if (!progressTimeState.jobId || progressTimeState.jobId !== currentJobId) {
+        resetTimeProgressForJob(currentJobId);
+      }
+
+      const enabledModules = parseEnabledModules(job.func);
+      const completed = Array.isArray(progress.completed_modules) ? progress.completed_modules : [];
+      const completedSet = new Set(completed);
+      const currentModule =
+        progress && typeof progress.module === "string" && enabledModules.includes(progress.module)
+          ? progress.module
+          : null;
+      const nowMs = Date.now();
+
+      if (!progressTimeState.startedMs) {
+        progressTimeState.startedMs = parseIsoMs(job.started_at) || parseIsoMs(job.created_at) || nowMs;
+      }
+      const elapsedSec = Math.max(0, (nowMs - progressTimeState.startedMs) / 1000);
+
+      if (progressTimeState.lastModule !== currentModule) {
+        if (
+          progressTimeState.lastModule &&
+          progressTimeState.moduleStartMs > 0 &&
+          completedSet.has(progressTimeState.lastModule)
+        ) {
+          const actualSec = Math.max(1, (nowMs - progressTimeState.moduleStartMs) / 1000);
+          const prevExpected =
+            progressTimeState.moduleExpectedSec[progressTimeState.lastModule] || actualSec;
+          progressTimeState.moduleExpectedSec[progressTimeState.lastModule] =
+            prevExpected * 0.65 + actualSec * 0.35;
+        }
+        progressTimeState.lastModule = currentModule;
+        progressTimeState.moduleStartMs = currentModule ? nowMs : 0;
+      } else if (currentModule && progressTimeState.moduleStartMs <= 0) {
+        progressTimeState.moduleStartMs = nowMs;
+      }
+
+      const moduleExpected = (m) =>
+        Number(progressTimeState.moduleExpectedSec[m] || BASE_MODULE_SECONDS[m] || 60);
+      const expectedTotalSec = Math.max(
+        1,
+        enabledModules.reduce((acc, m) => acc + moduleExpected(m), 0)
+      );
+      const completedExpectedSec = enabledModules.reduce(
+        (acc, m) => acc + (completedSet.has(m) ? moduleExpected(m) : 0),
+        0
+      );
+
+      const currentExpectedSec = currentModule ? moduleExpected(currentModule) : 0;
+      const currentElapsedSec =
+        currentModule && progressTimeState.moduleStartMs > 0
+          ? Math.max(0, (nowMs - progressTimeState.moduleStartMs) / 1000)
+          : 0;
+      const currentConsumedSec = Math.min(currentElapsedSec, currentExpectedSec * 0.99);
+      const doneEstimatedSec = Math.min(expectedTotalSec, completedExpectedSec + currentConsumedSec);
+
+      if (status === "succeeded") {
+        return { percent: 100, etaText: "0秒" };
+      }
+      if (status === "failed") {
+        return {
+          percent: clamp((doneEstimatedSec / expectedTotalSec) * 100, 0, 99.9),
+          etaText: "-",
+        };
+      }
+
+      const percent = clamp((doneEstimatedSec / expectedTotalSec) * 100, 0, 99.5);
+      let etaSec = expectedTotalSec - doneEstimatedSec;
+      if (doneEstimatedSec > 5 && elapsedSec > 8) {
+        const paceScale = elapsedSec / doneEstimatedSec;
+        const calibratedTotal = expectedTotalSec * paceScale;
+        etaSec = Math.max(0, calibratedTotal - elapsedSec);
+      }
+      return { percent, etaText: formatEta(etaSec) };
+    }
+
+    function setStatus(text, cls = "") {
+      jobStatusEl.textContent = text;
+      jobStatusEl.className = `status ${cls}`;
+    }
+
+    function clamp(v, lo, hi) {
+      return Math.max(lo, Math.min(hi, v));
+    }
+
+    function nearestBinIndex(value, bins) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < bins.length; i += 1) {
+        const d = Math.abs(value - bins[i]);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      return bestIdx;
+    }
+
+    function resetCoverage() {
+      cellCandidates.clear();
+      capturedShots.clear();
+      lastCellCaptureAt.clear();
+      lastActiveCell = null;
+      lastMetrics = null;
+      meshScale = 1.0;
+      autoCaptureInFlight = false;
+      lastAutoCaptureAt = 0;
+      captureSeq = 0;
+      refreshCoverageFromShots();
+    }
+
+    function ensureSharpnessSampler() {
+      if (sharpnessCanvas && sharpnessCtx) {
+        return;
+      }
+      sharpnessCanvas = document.createElement("canvas");
+      sharpnessCtx = sharpnessCanvas.getContext("2d", { willReadFrequently: true });
+    }
+
+    function computeSharpnessScore(minX, minY, maxX, maxY) {
+      if (!preview.videoWidth || !preview.videoHeight) {
+        return 0;
+      }
+      ensureSharpnessSampler();
+      if (!sharpnessCtx || !sharpnessCanvas) {
+        return 0;
+      }
+
+      const sampleSize = GUIDE.sharpnessSampleSize;
+      sharpnessCanvas.width = sampleSize;
+      sharpnessCanvas.height = sampleSize;
+
+      const vw = preview.videoWidth;
+      const vh = preview.videoHeight;
+      const pad = 0.06;
+      const x0 = clamp(minX - pad, 0, 1);
+      const y0 = clamp(minY - pad, 0, 1);
+      const x1 = clamp(maxX + pad, 0, 1);
+      const y1 = clamp(maxY + pad, 0, 1);
+      const sx = Math.floor(x0 * vw);
+      const sy = Math.floor(y0 * vh);
+      const sw = Math.max(16, Math.floor((x1 - x0) * vw));
+      const sh = Math.max(16, Math.floor((y1 - y0) * vh));
+
+      sharpnessCtx.drawImage(preview, sx, sy, sw, sh, 0, 0, sampleSize, sampleSize);
+      const img = sharpnessCtx.getImageData(0, 0, sampleSize, sampleSize);
+      const data = img.data;
+      const gray = new Uint8ClampedArray(sampleSize * sampleSize);
+      for (let i = 0, p = 0; i < gray.length; i += 1, p += 4) {
+        gray[i] = Math.round(data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114);
+      }
+
+      // Align with backend Laplacian-based sharpness metric:
+      // cv2.Laplacian(gray, CV_8UC1, ksize=3) then mean(lap).
+      // Here we emulate a ksize=3 Laplacian and CV_8U clamping.
+      let lapSum = 0;
+      let count = 0;
+      for (let y = 1; y < sampleSize - 1; y += 1) {
+        const row = y * sampleSize;
+        for (let x = 1; x < sampleSize - 1; x += 1) {
+          const idx = row + x;
+          let lap = (
+            2 * gray[idx - sampleSize - 1] +
+            2 * gray[idx - sampleSize + 1] +
+            2 * gray[idx + sampleSize - 1] +
+            2 * gray[idx + sampleSize + 1] -
+            8 * gray[idx]
+          );
+          if (lap < 0) lap = 0;
+          else if (lap > 255) lap = 255;
+          lapSum += lap;
+          count += 1;
+        }
+      }
+      if (count <= 0) return 0;
+      return lapSum / count;
+    }
+
+    function sectorLabel(r) {
+      return GUIDE.pitchLabels[r] || `扇形${r + 1}`;
+    }
+
+    function applyFanGridLayout() {
+      const columnCount = GUIDE.yawBins.length;
+      const cellWidth = 58;
+      guideGridEl.style.gridTemplateColumns = `repeat(${columnCount}, ${cellWidth}px)`;
+      captureListEl.style.gridTemplateColumns = `repeat(${columnCount}, ${cellWidth}px)`;
+    }
+
+    function initGuideGrid() {
+      applyFanGridLayout();
+      guideGridEl.innerHTML = "";
+      for (let r = 0; r < GUIDE.pitchBins.length; r += 1) {
+        for (let c = 0; c < GUIDE.yawBins.length; c += 1) {
+          const cell = document.createElement("div");
+          cell.className = "grid-cell";
+          cell.dataset.r = String(r);
+          cell.dataset.c = String(c);
+          cell.textContent = `${sectorLabel(r)}\n${formatAngle(GUIDE.yawBins[c])}°\n0/${GUIDE.minFramesPerBin}`;
+          guideGridEl.appendChild(cell);
+        }
+      }
+    }
+
+    function renderCoverageGrid() {
+      const cells = guideGridEl.querySelectorAll(".grid-cell");
+      let passed = 0;
+      for (const cell of cells) {
+        const r = Number(cell.dataset.r);
+        const c = Number(cell.dataset.c);
+        const cnt = coverageCounts[r][c];
+        const passedCell = cnt >= GUIDE.minFramesPerBin;
+        if (passedCell) passed += 1;
+
+        cell.classList.remove("pass", "active");
+        if (passedCell) {
+          cell.classList.add("pass");
+        } else if (lastActiveCell && lastActiveCell.r === r && lastActiveCell.c === c) {
+          cell.classList.add("active");
+        }
+        cell.textContent = `${sectorLabel(r)}\n${formatAngle(GUIDE.yawBins[c])}°\n${cnt}/${GUIDE.minFramesPerBin}`;
+      }
+      mCoverageEl.textContent = `${passed}/${totalCells}`;
+    }
+
+    function countCoveredCells() {
+      let covered = 0;
+      for (let r = 0; r < coverageCounts.length; r += 1) {
+        for (let c = 0; c < coverageCounts[r].length; c += 1) {
+          if (coverageCounts[r][c] >= GUIDE.minFramesPerBin) covered += 1;
+        }
+      }
+      return covered;
+    }
+
+    function getCellCandidates(key) {
+      return cellCandidates.get(key) || [];
+    }
+
+    function getCellShots(key) {
+      return capturedShots.get(key) || [];
+    }
+
+    function getCellShotCount(key) {
+      return getCellShots(key).length;
+    }
+
+    function getTotalShotCount() {
+      let total = 0;
+      for (const shots of capturedShots.values()) {
+        total += shots.length;
+      }
+      return total;
+    }
+
+    function getPitchCaptureCounts() {
+      const pitchCounts = Array.from({ length: GUIDE.pitchBins.length }, () => 0);
+      for (const [key, shots] of capturedShots.entries()) {
+        const [rStr] = key.split("_");
+        const r = Number(rStr);
+        if (Number.isFinite(r) && pitchCounts[r] !== undefined) {
+          pitchCounts[r] += shots.length;
+        }
+      }
+      return pitchCounts;
+    }
+
+    function getUploadGateState() {
+      const covered = countCoveredCells();
+      const coverageRatio = totalCells > 0 ? (covered / totalCells) : 0;
+      const pitchCounts = getPitchCaptureCounts();
+      const totalShots = getTotalShotCount();
+      const reasons = [];
+
+      if (totalShots < UPLOAD_GATE.minShots) {
+        reasons.push(`至少需要 ${UPLOAD_GATE.minShots} 张，当前 ${totalShots} 张`);
+      }
+      if (coverageRatio < UPLOAD_GATE.minCoverageRatio) {
+        reasons.push(`覆盖率至少 ${(UPLOAD_GATE.minCoverageRatio * 100).toFixed(0)}%，当前 ${(coverageRatio * 100).toFixed(0)}%`);
+      }
+      for (let r = 0; r < pitchCounts.length; r += 1) {
+        if (pitchCounts[r] < UPLOAD_GATE.minPerPitchShots) {
+          reasons.push(`${sectorLabel(r)}至少 ${UPLOAD_GATE.minPerPitchShots} 张，当前 ${pitchCounts[r]} 张`);
+        }
+      }
+
+      return {
+        ok: reasons.length === 0,
+        reasons,
+        covered,
+        coverageRatio,
+        totalShots,
+        pitchCounts,
+      };
+    }
+
+    function computeShotScore(metrics) {
+      if (!metrics) return 0;
+      const sharpness = Number(metrics.sharpness || 0);
+      const centerPenalty = (Math.abs(metrics.centerOffsetX || 0) + Math.abs(metrics.centerOffsetY || 0)) * 40;
+      const ratioMid = (GUIDE.faceRatioMin + GUIDE.faceRatioMax) * 0.5;
+      const ratioPenalty = Math.abs((metrics.faceRatio || 0) - ratioMid) * 200;
+      const rollPenalty = Math.abs(metrics.roll || 0) * 0.4;
+      return sharpness - centerPenalty - ratioPenalty - rollPenalty;
+    }
+
+    function poseDistanceDeg(a, b) {
+      if (!a || !b) return 0;
+      const dy = (a.poseYaw ?? 0) - (b.poseYaw ?? 0);
+      const dp = (a.posePitch ?? 0) - (b.posePitch ?? 0);
+      const dr = ((a.poseRoll ?? 0) - (b.poseRoll ?? 0)) * 0.6;
+      return Math.sqrt(dy * dy + dp * dp + dr * dr);
+    }
+
+    function minPoseDistanceToSet(shot, set) {
+      if (!set || set.length === 0) return CAPTURE_POLICY.minNovelPoseDist;
+      let minDist = Number.POSITIVE_INFINITY;
+      for (const other of set) {
+        const d = poseDistanceDeg(shot, other);
+        if (d < minDist) minDist = d;
+      }
+      return Number.isFinite(minDist) ? minDist : 0;
+    }
+
+    function normalizeQuality(score, minScore, maxScore) {
+      const denom = maxScore - minScore;
+      if (denom <= 1e-6) return 1;
+      return clamp((score - minScore) / denom, 0, 1);
+    }
+
+    function poolValueWithPeers(shot, peers) {
+      const novelty = minPoseDistanceToSet(shot, peers);
+      return (shot.score || 0) + CAPTURE_POLICY.poolDiversityWeight * novelty;
+    }
+
+    function selectTopKFromCandidates(candidates) {
+      if (!candidates || candidates.length === 0) return [];
+      const k = Math.min(CAPTURE_POLICY.topKPerCell, candidates.length);
+      const sorted = candidates.slice().sort((a, b) => (b.score || 0) - (a.score || 0));
+      const scores = sorted.map((s) => Number(s.score || 0));
+      const minScore = Math.min(...scores);
+      const maxScore = Math.max(...scores);
+      const remaining = sorted.slice();
+      const selected = [remaining.shift()];
+
+      while (selected.length < k && remaining.length > 0) {
+        let bestIdx = 0;
+        let bestUtility = Number.NEGATIVE_INFINITY;
+        let bestScore = Number.NEGATIVE_INFINITY;
+        let bestNovelty = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < remaining.length; i += 1) {
+          const shot = remaining[i];
+          const novelty = minPoseDistanceToSet(shot, selected);
+          const qNorm = normalizeQuality(Number(shot.score || 0), minScore, maxScore);
+          const dNorm = clamp(novelty / CAPTURE_POLICY.noveltyNormDeg, 0, 1);
+          const utility = CAPTURE_POLICY.selectQualityWeight * qNorm + CAPTURE_POLICY.selectDiversityWeight * dNorm;
+
+          const betterUtility = utility > bestUtility + 1e-6;
+          const tieBreakScore = Math.abs(utility - bestUtility) <= 1e-6 && (shot.score || 0) > bestScore + 1e-6;
+          const tieBreakNovelty =
+            Math.abs(utility - bestUtility) <= 1e-6 &&
+            Math.abs((shot.score || 0) - bestScore) <= 1e-6 &&
+            novelty > bestNovelty;
+          if (betterUtility || tieBreakScore || tieBreakNovelty) {
+            bestIdx = i;
+            bestUtility = utility;
+            bestScore = Number(shot.score || 0);
+            bestNovelty = novelty;
+          }
+        }
+        selected.push(remaining.splice(bestIdx, 1)[0]);
+      }
+
+      selected.sort((a, b) => (b.score || 0) - (a.score || 0));
+      return selected;
+    }
+
+    function refreshSelectedShotsForCell(key) {
+      const pool = getCellCandidates(key);
+      if (!pool.length) {
+        capturedShots.delete(key);
+        return;
+      }
+      const selected = selectTopKFromCandidates(pool);
+      capturedShots.set(key, selected);
+    }
+
+    function shouldCaptureIntoPool(key, candidateShot, nowMs) {
+      const lastCellAt = lastCellCaptureAt.get(key) || 0;
+      if (nowMs - lastCellAt < CAPTURE_POLICY.minCellIntervalMs) {
+        return { shouldCapture: false, replaceIndex: -1 };
+      }
+
+      const pool = getCellCandidates(key);
+      if (pool.length < CAPTURE_POLICY.candidatePoolPerCell) {
+        return { shouldCapture: true, replaceIndex: -1 };
+      }
+
+      let nearestIdx = 0;
+      let nearestDist = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < pool.length; i += 1) {
+        const d = poseDistanceDeg(candidateShot, pool[i]);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestIdx = i;
+        }
+      }
+
+      // Near-duplicate shot: require clearly better quality than nearest existing one.
+      if (nearestDist < CAPTURE_POLICY.minNovelPoseDist) {
+        const nearest = pool[nearestIdx];
+        if ((candidateShot.score || 0) > (nearest.score || 0) + CAPTURE_POLICY.replaceMinGain) {
+          return { shouldCapture: true, replaceIndex: nearestIdx };
+        }
+        return { shouldCapture: false, replaceIndex: -1 };
+      }
+
+      // Novel shot: compare diversity-aware value and replace the weakest candidate if beneficial.
+      let worstQuality = Number.POSITIVE_INFINITY;
+      for (const shot of pool) {
+        if ((shot.score || 0) < worstQuality) {
+          worstQuality = Number(shot.score || 0);
+        }
+      }
+      if ((candidateShot.score || 0) + CAPTURE_POLICY.maxNovelQualityDrop < worstQuality) {
+        return { shouldCapture: false, replaceIndex: -1 };
+      }
+
+      let replaceIdx = 0;
+      let replaceValue = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < pool.length; i += 1) {
+        const peers = pool.filter((_, j) => j !== i);
+        const value = poolValueWithPeers(pool[i], peers);
+        if (value < replaceValue) {
+          replaceValue = value;
+          replaceIdx = i;
+        }
+      }
+      const peersAfterReplace = pool.filter((_, j) => j !== replaceIdx);
+      const candidateValue = poolValueWithPeers(candidateShot, peersAfterReplace);
+      if (candidateValue > replaceValue + CAPTURE_POLICY.novelReplaceMargin) {
+        return { shouldCapture: true, replaceIndex: replaceIdx };
+      }
+      return { shouldCapture: false, replaceIndex: -1 };
+    }
+
+    function upsertCandidateInCell(key, shot, replaceIndex = -1) {
+      const pool = getCellCandidates(key).slice();
+      if (replaceIndex >= 0 && replaceIndex < pool.length) {
+        pool[replaceIndex] = shot;
+      } else {
+        pool.push(shot);
+      }
+      if (pool.length > CAPTURE_POLICY.candidatePoolPerCell) {
+        pool.sort((a, b) => (b.score || 0) - (a.score || 0));
+        pool.length = CAPTURE_POLICY.candidatePoolPerCell;
+      }
+      cellCandidates.set(key, pool);
+      lastCellCaptureAt.set(key, performance.now());
+      refreshSelectedShotsForCell(key);
+    }
+
+    function cellKey(r, c) {
+      return `${r}_${c}`;
+    }
+
+    function renderCaptureList() {
+      applyFanGridLayout();
+      captureListEl.innerHTML = "";
+      for (let r = 0; r < GUIDE.pitchBins.length; r += 1) {
+        for (let c = 0; c < GUIDE.yawBins.length; c += 1) {
+          const key = cellKey(r, c);
+          const item = document.createElement("div");
+          item.className = "capture-item";
+          const cnt = getCellShotCount(key);
+          if (cnt > 0) {
+            item.classList.add("done");
+            item.textContent = `${sectorLabel(r)} ${formatAngle(GUIDE.yawBins[c])}°\n${cnt}/${CAPTURE_POLICY.topKPerCell}`;
+          } else {
+            item.textContent = `${sectorLabel(r)} ${formatAngle(GUIDE.yawBins[c])}°\n待采集`;
+          }
+          captureListEl.appendChild(item);
+        }
+      }
+      const gate = getUploadGateState();
+      captureSummaryEl.textContent =
+        `${gate.totalShots} 张（覆盖 ${(gate.coverageRatio * 100).toFixed(0)}%，每格最多 ${CAPTURE_POLICY.topKPerCell} 张）`;
+      uploadCaptureBtn.disabled = !gate.ok;
+      uploadCaptureBtn.title = gate.ok ? "已满足高质量上传门槛" : `未达上传门槛：${gate.reasons.join("；")}`;
+      clearCaptureBtn.disabled = gate.totalShots === 0;
+    }
+
+    function refreshCoverageFromShots() {
+      for (let r = 0; r < coverageCounts.length; r += 1) {
+        for (let c = 0; c < coverageCounts[r].length; c += 1) {
+          coverageCounts[r][c] = 0;
+        }
+      }
+      for (const [key, shots] of capturedShots.entries()) {
+        const [rStr, cStr] = key.split("_");
+        const r = Number(rStr);
+        const c = Number(cStr);
+        if (Number.isFinite(r) && Number.isFinite(c) && coverageCounts[r] && Number.isFinite(coverageCounts[r][c])) {
+          coverageCounts[r][c] = shots.length;
+        }
+      }
+      renderCoverageGrid();
+      drawVirtualMesh();
+      renderCaptureList();
+    }
+
+    function initVirtualMesh3D() {
+      if (meshRenderer || !window.THREE) return;
+
+      const THREE_NS = window.THREE;
+      meshRenderer = new THREE_NS.WebGLRenderer({
+        canvas: virtualMeshCanvas,
+        antialias: true,
+        alpha: true,
+      });
+      meshRenderer.setClearColor(0x000000, 0);
+      if ("outputColorSpace" in meshRenderer && THREE_NS.SRGBColorSpace) {
+        meshRenderer.outputColorSpace = THREE_NS.SRGBColorSpace;
+      }
+
+      meshScene = new THREE_NS.Scene();
+      meshCamera = new THREE_NS.PerspectiveCamera(32, 1, 0.1, 20);
+      meshCamera.position.set(0, 0.02, 3.35);
+      meshCamera.lookAt(0, 0, 0);
+
+      const hemiLight = new THREE_NS.HemisphereLight(0xffffff, 0x8ea0bf, 1.0);
+      const keyLight = new THREE_NS.DirectionalLight(0xffffff, 0.95);
+      const fillLight = new THREE_NS.DirectionalLight(0xdbe8ff, 0.55);
+      const rimLight = new THREE_NS.DirectionalLight(0xffffff, 0.35);
+      keyLight.position.set(1.2, 1.3, 2.0);
+      fillLight.position.set(-1.4, 0.2, 1.1);
+      rimLight.position.set(0.0, 1.1, -2.0);
+      meshScene.add(hemiLight, keyLight, fillLight, rimLight);
+
+      meshGroup = new THREE_NS.Group();
+      meshScene.add(meshGroup);
+
+      meshTexCanvas = document.createElement("canvas");
+      meshTexCanvas.width = 2048;
+      meshTexCanvas.height = 1024;
+      meshTexCtx = meshTexCanvas.getContext("2d");
+
+      meshTexture = new THREE_NS.CanvasTexture(meshTexCanvas);
+      if ("colorSpace" in meshTexture && THREE_NS.SRGBColorSpace) {
+        meshTexture.colorSpace = THREE_NS.SRGBColorSpace;
+      }
+      meshTexture.needsUpdate = true;
+      meshTexture.wrapS = THREE_NS.RepeatWrapping;
+      meshTexture.wrapT = THREE_NS.ClampToEdgeWrapping;
+
+      meshHeadReady = false;
+      meshLoadError = "";
+      meshDisplayLabel = "程序化头模";
+      if (meshHintEl) {
+        meshHintEl.textContent = "正在加载开源真实人脸 Mesh...";
+      }
+      loadCanonicalFaceGeometry(THREE_NS)
+        .then((loaded) => {
+          attachHeadGeometry(THREE_NS, loaded.geometry);
+          meshUvBounds.uMin = loaded.uvBounds.uMin;
+          meshUvBounds.uMax = loaded.uvBounds.uMax;
+          meshUvBounds.vMin = loaded.uvBounds.vMin;
+          meshUvBounds.vMax = loaded.uvBounds.vMax;
+          meshHeadReady = true;
+          meshDisplayLabel = "MediaPipe 开源人脸";
+          drawVirtualMesh();
+        })
+        .catch((e) => {
+          meshLoadError = e && e.message ? e.message : String(e);
+          const fallback = buildFallbackHeadGeometry(THREE_NS);
+          attachHeadGeometry(THREE_NS, fallback);
+          meshHeadReady = true;
+          meshDisplayLabel = "程序化头模";
+          console.warn("加载开源人脸 Mesh 失败，已使用程序化头模兜底:", meshLoadError);
+          drawVirtualMesh();
+        });
+    }
+
+    function updateMeshUvBoundsFromArray(uvArray) {
+      let uMin = Infinity;
+      let uMax = -Infinity;
+      let vMin = Infinity;
+      let vMax = -Infinity;
+      for (let i = 0; i < uvArray.length; i += 2) {
+        const u = uvArray[i];
+        const v = uvArray[i + 1];
+        uMin = Math.min(uMin, u);
+        uMax = Math.max(uMax, u);
+        vMin = Math.min(vMin, v);
+        vMax = Math.max(vMax, v);
+      }
+      if (!Number.isFinite(uMin) || !Number.isFinite(vMin)) {
+        return { uMin: 0.08, uMax: 0.92, vMin: 0.08, vMax: 0.92 };
+      }
+      const padU = 0.03;
+      const padV = 0.03;
+      return {
+        uMin: clamp(uMin - padU, 0, 1),
+        uMax: clamp(uMax + padU, 0, 1),
+        vMin: clamp(vMin - padV, 0, 1),
+        vMax: clamp(vMax + padV, 0, 1),
+      };
+    }
+
+    function parseCanonicalObjGeometry(THREE_NS, objText) {
+      const verts = [];
+      const uvsRaw = [];
+      const positions = [];
+      const uvs = [];
+      const indices = [];
+      const comboToIndex = new Map();
+
+      const addFaceVert = (token) => {
+        const parts = token.split("/");
+        const vi = Number(parts[0]) - 1;
+        const vti = parts[1] ? (Number(parts[1]) - 1) : -1;
+        const key = `${vi}/${vti}`;
+        const existing = comboToIndex.get(key);
+        if (existing !== undefined) {
+          indices.push(existing);
+          return;
+        }
+        const p = verts[vi];
+        if (!p) {
+          throw new Error(`OBJ 顶点索引越界: ${token}`);
+        }
+        const uv = uvsRaw[vti] || [0.5, 0.5];
+        positions.push(p[0], p[1], p[2]);
+        uvs.push(uv[0], uv[1]);
+        const newIdx = positions.length / 3 - 1;
+        comboToIndex.set(key, newIdx);
+        indices.push(newIdx);
+      };
+
+      const lines = objText.split(/\r?\n/);
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        if (line.startsWith("v ")) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 4) {
+            verts.push([Number(parts[1]), Number(parts[2]), Number(parts[3])]);
+          }
+          continue;
+        }
+        if (line.startsWith("vt ")) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 3) {
+            uvsRaw.push([Number(parts[1]), Number(parts[2])]);
+          }
+          continue;
+        }
+        if (!line.startsWith("f ")) continue;
+        const parts = line.split(/\s+/).slice(1);
+        if (parts.length < 3) continue;
+        for (let i = 1; i < parts.length - 1; i += 1) {
+          addFaceVert(parts[0]);
+          addFaceVert(parts[i]);
+          addFaceVert(parts[i + 1]);
+        }
+      }
+
+      const geometry = new THREE_NS.BufferGeometry();
+      geometry.setAttribute("position", new THREE_NS.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute("uv", new THREE_NS.Float32BufferAttribute(uvs, 2));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+
+      const box = geometry.boundingBox;
+      const center = new THREE_NS.Vector3();
+      const size = new THREE_NS.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+      const normScale = 2.15 / maxDim;
+      geometry.translate(-center.x, -center.y, -center.z);
+      geometry.scale(normScale, normScale, normScale);
+
+      return {
+        geometry,
+        uvBounds: updateMeshUvBoundsFromArray(uvs),
+      };
+    }
+
+    async function loadCanonicalFaceGeometry(THREE_NS) {
+      const res = await fetch(CANONICAL_FACE_MESH_URL);
+      if (!res.ok) {
+        throw new Error(`下载模型失败: HTTP ${res.status}`);
+      }
+      const objText = await res.text();
+      return parseCanonicalObjGeometry(THREE_NS, objText);
+    }
+
+    function buildFallbackHeadGeometry(THREE_NS) {
+      const headGeometry = new THREE_NS.SphereGeometry(1.0, 64, 48);
+      const pos = headGeometry.attributes.position;
+      const p = new THREE_NS.Vector3();
+      for (let i = 0; i < pos.count; i += 1) {
+        p.fromBufferAttribute(pos, i);
+        const yRaw = p.y;
+        const zRaw = p.z;
+        p.y *= yRaw > 0 ? 1.12 : 1.04;
+        p.z *= zRaw > 0 ? 0.84 : 0.92;
+        const jaw = Math.max(0, (-p.y - 0.12) / 1.2);
+        p.x *= 1.0 - jaw * 0.16;
+        pos.setXYZ(i, p.x, p.y, p.z);
+      }
+      pos.needsUpdate = true;
+      headGeometry.computeVertexNormals();
+      return headGeometry;
+    }
+
+    function attachHeadGeometry(THREE_NS, headGeometry) {
+      if (!meshGroup) return;
+      while (meshGroup.children.length > 0) {
+        const child = meshGroup.children[meshGroup.children.length - 1];
+        meshGroup.remove(child);
+        if (child.geometry && child.geometry.dispose) {
+          child.geometry.dispose();
+        }
+        if (child.material && child.material.dispose) {
+          child.material.dispose();
+        }
+      }
+
+      const headMaterial = new THREE_NS.MeshStandardMaterial({
+        map: meshTexture,
+        roughness: 0.84,
+        metalness: 0.03,
+      });
+      const headMesh = new THREE_NS.Mesh(headGeometry, headMaterial);
+      headMesh.scale.set(1.0, 1.0, 1.0);
+      meshGroup.add(headMesh);
+
+      const wireMesh = new THREE_NS.LineSegments(
+        new THREE_NS.WireframeGeometry(headGeometry),
+        new THREE_NS.LineBasicMaterial({
+          color: 0x5e6f8f,
+          transparent: true,
+          opacity: 0.14,
+        })
+      );
+      wireMesh.scale.copy(headMesh.scale);
+      meshGroup.add(wireMesh);
+    }
+
+    function syncVirtualMeshCanvas() {
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const cssW = Math.max(240, Math.floor(virtualMeshCanvas.clientWidth || 320));
+      const cssH = Math.max(220, Math.floor(virtualMeshCanvas.clientHeight || 280));
+      if (!meshRenderer) {
+        virtualMeshCanvas.width = Math.floor(cssW * dpr);
+        virtualMeshCanvas.height = Math.floor(cssH * dpr);
+        return { w: cssW, h: cssH };
+      }
+      meshRenderer.setPixelRatio(dpr);
+      meshRenderer.setSize(cssW, cssH, false);
+      if (meshCamera) {
+        meshCamera.aspect = cssW / Math.max(1, cssH);
+        meshCamera.updateProjectionMatrix();
+      }
+      return { w: cssW, h: cssH };
+    }
+
+    function updateVirtualMeshTexture() {
+      if (!meshTexCtx || !meshTexCanvas || !meshTexture) return;
+      const ctx = meshTexCtx;
+      const W = meshTexCanvas.width;
+      const H = meshTexCanvas.height;
+
+      ctx.clearRect(0, 0, W, H);
+      const skinGrad = ctx.createLinearGradient(0, 0, 0, H);
+      skinGrad.addColorStop(0, "#f0d7c7");
+      skinGrad.addColorStop(0.45, "#e3c1ad");
+      skinGrad.addColorStop(1, "#d2a88e");
+      ctx.fillStyle = skinGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      const uMin = meshUvBounds.uMin;
+      const uMax = meshUvBounds.uMax;
+      const vMin = meshUvBounds.vMin;
+      const vMax = meshUvBounds.vMax;
+
+      ctx.fillStyle = "rgba(56,70,95,0.13)";
+      ctx.fillRect(0, 0, uMin * W, H);
+      ctx.fillRect(uMax * W, 0, (1 - uMax) * W, H);
+
+      const rowCount = GUIDE.pitchBins.length;
+      const colCount = GUIDE.yawBins.length;
+
+      for (let r = 0; r < rowCount; r += 1) {
+        const mappedR = rowCount - 1 - r;
+        for (let c = 0; c < colCount; c += 1) {
+          const uu0 = uMin + (uMax - uMin) * (c / colCount);
+          const uu1 = uMin + (uMax - uMin) * ((c + 1) / colCount);
+          const vv0 = vMin + (vMax - vMin) * (mappedR / rowCount);
+          const vv1 = vMin + (vMax - vMin) * ((mappedR + 1) / rowCount);
+          const x0 = uu0 * W;
+          const y0 = vv0 * H;
+          const ww = (uu1 - uu0) * W;
+          const hh = (vv1 - vv0) * H;
+
+          const cnt = coverageCounts[r][c];
+          const ratio = clamp(cnt / GUIDE.minFramesPerBin, 0, 1);
+          const isCurrent = !!lastActiveCell && lastActiveCell.r === r && lastActiveCell.c === c;
+          let fill = "rgba(129,144,172,0.24)";
+          if (ratio > 0) {
+            fill = "rgba(23,162,93,0.56)";
+          }
+          if (isCurrent && ratio < 1) {
+            fill = "rgba(37,128,255,0.50)";
+          }
+
+          ctx.fillStyle = fill;
+          ctx.fillRect(x0, y0, ww, hh);
+
+          if (ratio >= 1) {
+            ctx.strokeStyle = "rgba(9,120,65,0.96)";
+          } else {
+            ctx.strokeStyle = "rgba(66,86,122,0.66)";
+          }
+          ctx.lineWidth = isCurrent ? 4 : 2;
+          ctx.strokeRect(x0, y0, ww, hh);
+        }
+      }
+
+      ctx.strokeStyle = "rgba(34,47,76,0.38)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(uMin * W, vMin * H, (uMax - uMin) * W, (vMax - vMin) * H);
+
+      meshTexture.needsUpdate = true;
+    }
+
+    function computeMeshScale(faceRatio) {
+      const lo = GUIDE.faceRatioMin * 0.75;
+      const hi = GUIDE.faceRatioMax * 1.25;
+      const t = clamp((faceRatio - lo) / Math.max(1e-6, hi - lo), 0, 1);
+      return 0.72 + t * 0.62;
+    }
+
+    function shouldMirrorPreview() {
+      return currentFacingMode === "user";
+    }
+
+    function mapYawForCoverage(yawValue) {
+      // Front camera uses mirrored preview; rear camera should flip yaw for sector mapping
+      // so the painted coverage side matches the mesh side seen on screen.
+      return shouldMirrorPreview() ? yawValue : -yawValue;
+    }
+
+    function applyPreviewOrientation() {
+      const mirrored = shouldMirrorPreview();
+      preview.classList.toggle("mirrored", mirrored);
+      overlay.classList.toggle("mirrored", mirrored);
+    }
+
+    function drawVirtualMesh() {
+      initVirtualMesh3D();
+      syncVirtualMeshCanvas();
+      if (!meshRenderer || !meshScene || !meshCamera || !meshGroup) {
+        meshHintEl.textContent = "3D Mesh 初始化失败，请检查浏览器 WebGL 支持。";
+        return;
+      }
+
+      updateVirtualMeshTexture();
+
+      const yawRaw = lastMetrics ? lastMetrics.yaw : 0;
+      const pitch = lastMetrics ? lastMetrics.pitch : 0;
+      const rollRaw = lastMetrics ? lastMetrics.roll : 0;
+      const yaw = shouldMirrorPreview() ? -yawRaw : yawRaw;
+      const roll = -rollRaw;
+      const targetRotY = (yaw * Math.PI / 180) * 0.9;
+      const targetRotX = (-pitch * Math.PI / 180) * 0.58;
+      const targetRotZ = (roll * Math.PI / 180) * 0.42;
+      meshState.rotY += (targetRotY - meshState.rotY) * 0.22;
+      meshState.rotX += (targetRotX - meshState.rotX) * 0.22;
+      meshState.rotZ += (targetRotZ - meshState.rotZ) * 0.22;
+      meshGroup.rotation.set(meshState.rotX, meshState.rotY, meshState.rotZ);
+
+      const targetScale = lastMetrics ? (0.84 + (meshScale - 1.0) * 0.5) : 0.84;
+      meshState.scale += (targetScale - meshState.scale) * 0.18;
+      meshGroup.scale.setScalar(meshState.scale);
+
+      meshRenderer.render(meshScene, meshCamera);
+
+      if (!meshHeadReady) {
+        meshHintEl.textContent = "正在加载开源真实人脸 Mesh...";
+        return;
+      }
+
+      const covered = countCoveredCells();
+      if (!lastMetrics) {
+        if (meshLoadError) {
+          meshHintEl.textContent = `3D Mesh 载入失败，当前使用${meshDisplayLabel}。`;
+        } else {
+          meshHintEl.textContent = `${meshDisplayLabel}已加载：绿色=已拍，蓝色=当前命中，灰色=未拍。`;
+        }
+      } else {
+        const yawTag = GUIDE.yawBins[lastMetrics.yawIdx];
+        meshHintEl.textContent =
+          `当前: ${sectorLabel(lastMetrics.pitchIdx)} ${formatAngle(yawTag)}°；覆盖: ${covered}/${totalCells}（${meshDisplayLabel}）`;
+      }
+    }
+
+    function setResultViewerHint(text) {
+      if (resultViewerHintEl) {
+        resultViewerHintEl.textContent = text;
+      }
+    }
+
+    function syncResultViewerSize() {
+      if (!resultViewerCanvas) return;
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const cssW = Math.max(280, Math.floor(resultViewerCanvas.clientWidth || 320));
+      const cssH = Math.max(220, Math.floor(resultViewerCanvas.clientHeight || 280));
+      if (!resultRenderer) {
+        resultViewerCanvas.width = Math.floor(cssW * dpr);
+        resultViewerCanvas.height = Math.floor(cssH * dpr);
+        return;
+      }
+      resultRenderer.setPixelRatio(dpr);
+      resultRenderer.setSize(cssW, cssH, false);
+      if (resultCamera) {
+        resultCamera.aspect = cssW / Math.max(1, cssH);
+        resultCamera.updateProjectionMatrix();
+      }
+    }
+
+    function disposeResultObject(node) {
+      if (!node) return;
+      node.traverse((child) => {
+        if (child.geometry && child.geometry.dispose) {
+          child.geometry.dispose();
+        }
+        if (child.material) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          for (const mat of mats) {
+            if (mat.map && mat.map.dispose) mat.map.dispose();
+            if (mat.dispose) mat.dispose();
+          }
+        }
+      });
+    }
+
+    function clearResultMesh() {
+      if (!resultRoot || !resultActiveMesh) return;
+      resultRoot.remove(resultActiveMesh);
+      disposeResultObject(resultActiveMesh);
+      resultActiveMesh = null;
+    }
+
+    function animateResultViewer() {
+      if (!resultRenderer || !resultScene || !resultCamera) return;
+      resultAnimHandle = window.requestAnimationFrame(animateResultViewer);
+      resultViewState.yaw += (resultViewState.targetYaw - resultViewState.yaw) * 0.22;
+      resultViewState.pitch += (resultViewState.targetPitch - resultViewState.pitch) * 0.22;
+      resultViewState.distance += (resultViewState.targetDistance - resultViewState.distance) * 0.18;
+
+      const cp = Math.cos(resultViewState.pitch);
+      const sp = Math.sin(resultViewState.pitch);
+      const sy = Math.sin(resultViewState.yaw);
+      const cy = Math.cos(resultViewState.yaw);
+      const d = resultViewState.distance;
+      resultCamera.position.set(d * sy * cp, d * sp, d * cy * cp);
+      resultCamera.lookAt(0, 0, 0);
+      resultRenderer.render(resultScene, resultCamera);
+    }
+
+    function initResultViewer() {
+      if (resultRenderer || !window.THREE || !resultViewerCanvas) return;
+      const THREE_NS = window.THREE;
+      try {
+        resultRenderer = new THREE_NS.WebGLRenderer({
+          canvas: resultViewerCanvas,
+          antialias: true,
+          alpha: true,
+        });
+      } catch (e) {
+        setResultViewerHint(`3D 预览初始化失败: ${e.message || e}`);
+        return;
+      }
+      resultRenderer.setClearColor(0x000000, 0);
+      if ("outputColorSpace" in resultRenderer && THREE_NS.SRGBColorSpace) {
+        resultRenderer.outputColorSpace = THREE_NS.SRGBColorSpace;
+      }
+
+      resultScene = new THREE_NS.Scene();
+      resultCamera = new THREE_NS.PerspectiveCamera(34, 1, 0.01, 100);
+
+      const hemi = new THREE_NS.HemisphereLight(0xffffff, 0x90a2c0, 0.92);
+      const key = new THREE_NS.DirectionalLight(0xffffff, 0.92);
+      const fill = new THREE_NS.DirectionalLight(0xdce9ff, 0.62);
+      key.position.set(1.2, 1.4, 2.0);
+      fill.position.set(-1.1, 0.3, 1.0);
+      resultScene.add(hemi, key, fill);
+
+      resultRoot = new THREE_NS.Group();
+      resultScene.add(resultRoot);
+      syncResultViewerSize();
+
+      resultViewerCanvas.addEventListener("pointerdown", (ev) => {
+        resultViewState.dragging = true;
+        resultViewState.lastX = ev.clientX;
+        resultViewState.lastY = ev.clientY;
+        resultViewerCanvas.classList.add("dragging");
+        resultViewerCanvas.setPointerCapture(ev.pointerId);
+      });
+      resultViewerCanvas.addEventListener("pointermove", (ev) => {
+        if (!resultViewState.dragging) return;
+        const dx = ev.clientX - resultViewState.lastX;
+        const dy = ev.clientY - resultViewState.lastY;
+        resultViewState.lastX = ev.clientX;
+        resultViewState.lastY = ev.clientY;
+        resultViewState.targetYaw += dx * 0.012;
+        resultViewState.targetPitch = clamp(resultViewState.targetPitch + dy * 0.008, -1.05, 1.05);
+      });
+      resultViewerCanvas.addEventListener("pointerup", () => {
+        resultViewState.dragging = false;
+        resultViewerCanvas.classList.remove("dragging");
+      });
+      resultViewerCanvas.addEventListener("pointercancel", () => {
+        resultViewState.dragging = false;
+        resultViewerCanvas.classList.remove("dragging");
+      });
+      resultViewerCanvas.addEventListener("wheel", (ev) => {
+        ev.preventDefault();
+        resultViewState.targetDistance = clamp(
+          resultViewState.targetDistance + ev.deltaY * 0.002,
+          1.2,
+          6.5
+        );
+      }, { passive: false });
+
+      if (!resultAnimHandle) {
+        animateResultViewer();
+      }
+    }
+
+    function resolveObjIndex(rawToken, length) {
+      if (!rawToken) return null;
+      const idx = Number(rawToken);
+      if (!Number.isFinite(idx) || idx === 0) return null;
+      return idx < 0 ? (length + idx) : (idx - 1);
+    }
+
+    function parseObjGeometryForViewer(THREE_NS, objText) {
+      const verts = [];
+      const uvsRaw = [];
+      const normalsRaw = [];
+      const positions = [];
+      const uvs = [];
+      const normals = [];
+      const indices = [];
+      const comboToIndex = new Map();
+      let hasAnyUV = false;
+      let hasAllNormal = true;
+
+      const addVert = (token) => {
+        const parts = token.split("/");
+        const vi = resolveObjIndex(parts[0], verts.length);
+        const vti = resolveObjIndex(parts[1], uvsRaw.length);
+        const vni = resolveObjIndex(parts[2], normalsRaw.length);
+        if (vi === null || vi < 0 || vi >= verts.length) {
+          throw new Error(`OBJ 顶点索引越界: ${token}`);
+        }
+        const key = `${vi}/${vti ?? -1}/${vni ?? -1}`;
+        const existing = comboToIndex.get(key);
+        if (existing !== undefined) {
+          indices.push(existing);
+          return;
+        }
+
+        const p = verts[vi];
+        positions.push(p[0], p[1], p[2]);
+
+        if (vti !== null && vti >= 0 && vti < uvsRaw.length) {
+          const uv = uvsRaw[vti];
+          uvs.push(uv[0], uv[1]);
+          hasAnyUV = true;
+        } else {
+          uvs.push(0.0, 0.0);
+        }
+
+        if (vni !== null && vni >= 0 && vni < normalsRaw.length) {
+          const n = normalsRaw[vni];
+          normals.push(n[0], n[1], n[2]);
+        } else {
+          normals.push(0.0, 0.0, 0.0);
+          hasAllNormal = false;
+        }
+
+        const newIndex = positions.length / 3 - 1;
+        comboToIndex.set(key, newIndex);
+        indices.push(newIndex);
+      };
+
+      const lines = objText.split(/\r?\n/);
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line || line.startsWith("#")) continue;
+        if (line.startsWith("v ")) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 4) {
+            verts.push([Number(parts[1]), Number(parts[2]), Number(parts[3])]);
+          }
+          continue;
+        }
+        if (line.startsWith("vt ")) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 3) {
+            uvsRaw.push([Number(parts[1]), Number(parts[2])]);
+          }
+          continue;
+        }
+        if (line.startsWith("vn ")) {
+          const parts = line.split(/\s+/);
+          if (parts.length >= 4) {
+            normalsRaw.push([Number(parts[1]), Number(parts[2]), Number(parts[3])]);
+          }
+          continue;
+        }
+        if (!line.startsWith("f ")) continue;
+        const parts = line.split(/\s+/).slice(1).filter(Boolean);
+        if (parts.length < 3) continue;
+        for (let i = 1; i < parts.length - 1; i += 1) {
+          addVert(parts[0]);
+          addVert(parts[i]);
+          addVert(parts[i + 1]);
+        }
+      }
+
+      if (positions.length === 0 || indices.length === 0) {
+        throw new Error("OBJ 未解析出有效三角面");
+      }
+
+      const geometry = new THREE_NS.BufferGeometry();
+      geometry.setAttribute("position", new THREE_NS.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      if (hasAnyUV) {
+        geometry.setAttribute("uv", new THREE_NS.Float32BufferAttribute(uvs, 2));
+      }
+      if (hasAllNormal && normalsRaw.length > 0) {
+        geometry.setAttribute("normal", new THREE_NS.Float32BufferAttribute(normals, 3));
+      } else {
+        geometry.computeVertexNormals();
+      }
+      geometry.computeBoundingBox();
+      return {
+        geometry,
+        hasUV: hasAnyUV,
+      };
+    }
+
+    function setQuickDownloadButtons(objArtifact, texArtifact) {
+      resultQuickDownloadsEl.innerHTML = "";
+      const pushDownload = (label, artifact) => {
+        if (!artifact) return;
+        const a = document.createElement("a");
+        a.href = api(artifact.download_url);
+        a.textContent = label;
+        a.download = artifact.path.split("/").pop() || "";
+        resultQuickDownloadsEl.appendChild(a);
+      };
+      pushDownload("下载纹理OBJ", objArtifact);
+      pushDownload("下载纹理PNG", texArtifact);
+    }
+
+    async function loadResultViewerMesh(objUrl, texUrl) {
+      initResultViewer();
+      if (!resultRenderer || !resultRoot || !window.THREE) {
+        return;
+      }
+      const THREE_NS = window.THREE;
+      setResultViewerHint("正在加载重建 Mesh...");
+      clearResultMesh();
+
+      const objRes = await fetch(objUrl);
+      if (!objRes.ok) {
+        throw new Error(`OBJ 下载失败: HTTP ${objRes.status}`);
+      }
+      const objText = await objRes.text();
+      const parsed = parseObjGeometryForViewer(THREE_NS, objText);
+
+      let texture = null;
+      if (texUrl && parsed.hasUV) {
+        texture = await new Promise((resolve, reject) => {
+          new THREE_NS.TextureLoader().load(
+            texUrl,
+            (tex) => resolve(tex),
+            undefined,
+            (err) => reject(err || new Error("纹理加载失败"))
+          );
+        });
+        if ("colorSpace" in texture && THREE_NS.SRGBColorSpace) {
+          texture.colorSpace = THREE_NS.SRGBColorSpace;
+        }
+      }
+
+      const material = new THREE_NS.MeshStandardMaterial({
+        color: 0xffffff,
+        map: texture,
+        roughness: 0.82,
+        metalness: 0.03,
+        side: THREE_NS.DoubleSide,
+      });
+      const mesh = new THREE_NS.Mesh(parsed.geometry, material);
+      const box = parsed.geometry.boundingBox;
+      const center = new THREE_NS.Vector3();
+      const size = new THREE_NS.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+      const fitScale = 1.9 / maxDim;
+      mesh.position.set(-center.x * fitScale, -center.y * fitScale, -center.z * fitScale);
+      mesh.scale.setScalar(fitScale);
+
+      resultRoot.add(mesh);
+      resultActiveMesh = mesh;
+      resultViewState.yaw = 0.0;
+      resultViewState.pitch = 0.0;
+      resultViewState.targetYaw = 0.0;
+      resultViewState.targetPitch = 0.0;
+      resultViewState.distance = 2.9;
+      resultViewState.targetDistance = 2.9;
+
+      const texNote = texture ? "已加载纹理" : "未检测到纹理图";
+      setResultViewerHint(`拖拽可旋转，滚轮可缩放（${texNote}）。`);
+    }
+
+    function resetResultViewer() {
+      setResultViewerHint("任务进行中，完成后会显示可旋转的带纹理 Mesh。");
+      resultQuickDownloadsEl.innerHTML = "";
+      clearResultMesh();
+    }
+
+    function pickArtifact(artifacts, preferredPaths, fallbackExt = "") {
+      for (const p of preferredPaths) {
+        const found = artifacts.find((it) => it.path === p);
+        if (found) return found;
+      }
+      if (!fallbackExt) return null;
+      return artifacts.find((it) => it.path.toLowerCase().endsWith(fallbackExt.toLowerCase())) || null;
+    }
+
+    function syncOverlaySize() {
+      const w = preview.videoWidth || 0;
+      const h = preview.videoHeight || 0;
+      if (!w || !h) return;
+      overlay.width = w;
+      overlay.height = h;
+    }
+
+    function getGuideFaceAspect(refMetrics = null) {
+      if (refMetrics) {
+        const bw = Math.max(1e-4, Number(refMetrics.maxX || 0) - Number(refMetrics.minX || 0));
+        const bh = Math.max(1e-4, Number(refMetrics.maxY || 0) - Number(refMetrics.minY || 0));
+        return clamp(bw / bh, 0.62, 1.05);
+      }
+      return 0.82;
+    }
+
+    function drawCenterGuide(refMetrics = null) {
+      if (!overlay.width || !overlay.height) return;
+      const w = overlay.width;
+      const h = overlay.height;
+
+      // Keep a subtle center zone (for center-offset constraint).
+      const ox = GUIDE.centerOffsetMax * w;
+      const oy = GUIDE.centerOffsetMax * h;
+      const zoneX = w * 0.5 - ox;
+      const zoneY = h * 0.5 - oy;
+      const zoneW = ox * 2;
+      const zoneH = oy * 2;
+      overlayCtx.setLineDash([7, 6]);
+      overlayCtx.strokeStyle = "rgba(106,145,210,0.38)";
+      overlayCtx.lineWidth = 1.5;
+      overlayCtx.strokeRect(zoneX, zoneY, zoneW, zoneH);
+
+      // Main blue guide is now a target face-size box based on desired face ratio.
+      const targetRatio = (GUIDE.faceRatioMin + GUIDE.faceRatioMax) * 0.5;
+      const aspect = getGuideFaceAspect(refMetrics);
+      let targetW = Math.sqrt(targetRatio * aspect) * w;
+      let targetH = targetW / aspect;
+
+      // Keep the target guide inside screen with a small margin.
+      const marginScale = Math.min(0.94 * w / Math.max(1e-4, targetW), 0.94 * h / Math.max(1e-4, targetH), 1);
+      targetW *= marginScale;
+      targetH *= marginScale;
+
+      const tx = (w - targetW) * 0.5;
+      const ty = (h - targetH) * 0.5;
+      overlayCtx.setLineDash([]);
+      overlayCtx.strokeStyle = "rgba(31,128,255,0.92)";
+      overlayCtx.lineWidth = 2.4;
+      overlayCtx.strokeRect(tx, ty, targetW, targetH);
+
+      overlayCtx.fillStyle = "rgba(31,128,255,0.08)";
+      overlayCtx.fillRect(tx, ty, targetW, targetH);
+    }
+
+    function setGuideMessage(text, cls) {
+      guideMessageEl.textContent = text;
+      guideMessageEl.className = `guide-msg ${cls}`;
+    }
+
+    function setCameraHint(text, cls = "warn") {
+      if (!cameraHintEl) return;
+      cameraHintEl.textContent = text;
+      cameraHintEl.className = `camera-hint ${cls}`;
+    }
+
+    function getFaceDistanceGuide(faceRatio) {
+      const minRatio = GUIDE.faceRatioMin;
+      const maxRatio = GUIDE.faceRatioMax;
+      if (faceRatio < minRatio * 0.75) {
+        return {
+          short: "人脸偏小，距离偏远：向前一步",
+          detail: "离得有点远，向前一步会更容易拍到清晰细节",
+          cls: "warn",
+        };
+      }
+      if (faceRatio < minRatio) {
+        return {
+          short: "人脸略小：再靠近一点点",
+          detail: "再靠近一点点就到最佳距离了",
+          cls: "warn",
+        };
+      }
+      if (faceRatio > maxRatio * 1.25) {
+        return {
+          short: "人脸偏大，距离太近：后退一步",
+          detail: "离得太近了，后退一步能减少畸变",
+          cls: "warn",
+        };
+      }
+      if (faceRatio > maxRatio) {
+        return {
+          short: "人脸略大：稍微后退一点",
+          detail: "稍微后退一点点会更稳定",
+          cls: "warn",
+        };
+      }
+      return {
+        short: "距离合适：保持稳定即可自动拍摄",
+        detail: "距离很合适，保持稳定继续覆盖不同角度",
+        cls: "ok",
+      };
+    }
+
+    function clearOverlay(refMetrics = null) {
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      drawCenterGuide(refMetrics);
+    }
+
+    async function initFaceMesh() {
+      if (faceMesh) return;
+      if (!window.FaceMesh) {
+        throw new Error("FaceMesh 脚本加载失败");
+      }
+
+      faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+      });
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: false,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6,
+      });
+      faceMesh.onResults(onFaceResults);
+    }
+
+    function p(lms, idx) {
+      return lms[idx] || { x: 0, y: 0 };
+    }
+
+    function analyzeFace(lms) {
+      let minX = 1;
+      let minY = 1;
+      let maxX = 0;
+      let maxY = 0;
+      for (const lm of lms) {
+        minX = Math.min(minX, lm.x);
+        minY = Math.min(minY, lm.y);
+        maxX = Math.max(maxX, lm.x);
+        maxY = Math.max(maxY, lm.y);
+      }
+
+      const bw = Math.max(0, maxX - minX);
+      const bh = Math.max(0, maxY - minY);
+      const faceRatio = bw * bh;
+      const cx = (minX + maxX) * 0.5;
+      const cy = (minY + maxY) * 0.5;
+      const centerOffsetX = Math.abs(cx - 0.5);
+      const centerOffsetY = Math.abs(cy - 0.5);
+
+      const leftEye = p(lms, 33);
+      const rightEye = p(lms, 263);
+      const nose = p(lms, 1);
+      const mouthTop = p(lms, 13);
+      const mouthBottom = p(lms, 14);
+      const leftCheek = p(lms, 234);
+      const rightCheek = p(lms, 454);
+
+      const roll = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x) * 180 / Math.PI;
+
+      const cheekHalf = Math.max(1e-4, (rightCheek.x - leftCheek.x) * 0.5);
+      const cheekMid = (rightCheek.x + leftCheek.x) * 0.5;
+      const yaw = clamp(((nose.x - cheekMid) / cheekHalf) * 70.0, -90, 90);
+
+      const eyeY = (leftEye.y + rightEye.y) * 0.5;
+      const mouthY = (mouthTop.y + mouthBottom.y) * 0.5;
+      const midY = (eyeY + mouthY) * 0.5;
+      const emHalf = Math.max(1e-4, (mouthY - eyeY) * 0.5);
+      const pitch = clamp(((midY - nose.y) / emHalf) * 42.0, -75, 75);
+
+      const passFaceRatio = faceRatio >= GUIDE.faceRatioMin && faceRatio <= GUIDE.faceRatioMax;
+      const passCenter = centerOffsetX <= GUIDE.centerOffsetMax && centerOffsetY <= GUIDE.centerOffsetMax;
+      const passRoll = Math.abs(roll) <= GUIDE.rollAbsMax;
+      const passYawRange = Math.abs(yaw) <= GUIDE.yawAbsMax;
+      const passPitchRange = Math.abs(pitch) <= GUIDE.pitchAbsMax;
+      const passPoseRange = passYawRange && passPitchRange;
+      const sharpness = computeSharpnessScore(minX, minY, maxX, maxY);
+      const passSharpness = sharpness >= GUIDE.sharpnessMin;
+      const passFrame = passFaceRatio && passCenter && passRoll && passPoseRange && passSharpness;
+
+      const yawCoverage = mapYawForCoverage(yaw);
+      const yawIdx = nearestBinIndex(yawCoverage, GUIDE.yawBins);
+      const pitchIdx = nearestBinIndex(pitch, GUIDE.pitchBins);
+
+      return {
+        minX, minY, maxX, maxY,
+        faceRatio,
+        centerOffsetX,
+        centerOffsetY,
+        yaw,
+        pitch,
+        roll,
+        passFaceRatio,
+        passCenter,
+        passRoll,
+        passYawRange,
+        passPitchRange,
+        passPoseRange,
+        sharpness,
+        passSharpness,
+        passFrame,
+        yawIdx,
+        pitchIdx,
+      };
+    }
+
+    function drawFaceOverlay(metrics) {
+      clearOverlay(metrics);
+      const w = overlay.width;
+      const h = overlay.height;
+      if (!w || !h) return;
+
+      const x = metrics.minX * w;
+      const y = metrics.minY * h;
+      const bw = (metrics.maxX - metrics.minX) * w;
+      const bh = (metrics.maxY - metrics.minY) * h;
+
+      overlayCtx.strokeStyle = metrics.passFrame ? "rgba(16,170,85,0.95)" : "rgba(255,120,38,0.95)";
+      overlayCtx.lineWidth = 2;
+      overlayCtx.strokeRect(x, y, bw, bh);
+    }
+
+    function updateGuideMetrics(metrics) {
+      lastMetrics = metrics;
+      meshScale = computeMeshScale(metrics.faceRatio);
+      const distanceGuide = getFaceDistanceGuide(metrics.faceRatio);
+      mFaceRatioEl.textContent = `${(metrics.faceRatio * 100).toFixed(1)}%`;
+      mCenterEl.textContent = `${(metrics.centerOffsetX * 100).toFixed(1)}%, ${(metrics.centerOffsetY * 100).toFixed(1)}%`;
+      mPoseEl.textContent = `${metrics.yaw.toFixed(1)} / ${metrics.pitch.toFixed(1)} / ${metrics.roll.toFixed(1)}`;
+      mSharpnessEl.textContent = `${metrics.sharpness.toFixed(1)} / ${GUIDE.sharpnessMin}`;
+
+      let msg = "姿态有效，转动头部覆盖更多未采集视角";
+      let cls = "ok";
+      if (!metrics.passFaceRatio) {
+        msg = distanceGuide.detail;
+        cls = "warn";
+        setCameraHint(distanceGuide.short, distanceGuide.cls);
+      } else if (!metrics.passCenter) {
+        msg = "很好，再把人脸移到画面中心一点点";
+        cls = "warn";
+        setCameraHint("请把脸放在中间蓝框内", "warn");
+      } else if (!metrics.passRoll) {
+        msg = `头有点歪，稍微摆正一些（|roll| <= ${GUIDE.rollAbsMax}°）`;
+        cls = "warn";
+        setCameraHint("头部稍微摆正一些，更容易通过", "warn");
+      } else if (!metrics.passPoseRange) {
+        msg = `请保持在目标范围：左右 ±${GUIDE.yawAbsMax}°，上下 ±${GUIDE.pitchAbsMax}°`;
+        cls = "warn";
+        setCameraHint("角度有点大，回到可拍范围内", "warn");
+      } else if (!metrics.passSharpness) {
+        msg = `画面偏模糊，先停稳 1 秒再拍（清晰度 >= ${GUIDE.sharpnessMin}）`;
+        cls = "warn";
+        setCameraHint("有点糊，请停稳并保持光线均匀", "warn");
+      } else {
+        const currentKey = cellKey(metrics.pitchIdx, metrics.yawIdx);
+        const currentCnt = getCellShotCount(currentKey);
+        const gate = getUploadGateState();
+        if (gate.ok) {
+          msg = `采集达标（${gate.totalShots} 张，覆盖 ${(gate.coverageRatio * 100).toFixed(0)}%），可直接上传重建。`;
+          cls = "ok";
+          setCameraHint("采集完成，可直接上传重建", "ok");
+        } else if (currentCnt >= CAPTURE_POLICY.topKPerCell) {
+          msg = `当前视角已达 ${currentCnt}/${CAPTURE_POLICY.topKPerCell}，系统会继续自动替换更优且更不同的图，建议同时转向未覆盖区域。`;
+          cls = "ok";
+          setCameraHint("该角度已采满，可换方向；系统仍会自动优化保留图", "ok");
+        } else if (currentCnt > 0) {
+          msg = `当前视角已采集 ${currentCnt}/${CAPTURE_POLICY.topKPerCell}，继续稳定会在候选池里自动筛更清晰且更不同的帧。`;
+          cls = "ok";
+          setCameraHint(distanceGuide.short, "ok");
+        } else {
+          msg = "当前视角可保存，系统会连续采样并保留该视角清晰且多样的 Top-K。";
+          cls = "ok";
+          setCameraHint(distanceGuide.short, "ok");
+        }
+      }
+      setGuideMessage(msg, cls);
+
+      lastActiveCell = { r: metrics.pitchIdx, c: metrics.yawIdx };
+      renderCoverageGrid();
+      drawVirtualMesh();
+    }
+
+    function onFaceResults(results) {
+      if (!analysisEnabled) return;
+      if (!overlay.width || !overlay.height) {
+        syncOverlaySize();
+      }
+
+      const lms = results && results.multiFaceLandmarks && results.multiFaceLandmarks[0];
+      if (!lms) {
+        clearOverlay();
+        mFaceRatioEl.textContent = "-";
+        mCenterEl.textContent = "-";
+        mPoseEl.textContent = "-";
+        mSharpnessEl.textContent = "-";
+        setGuideMessage("未检测到人脸，请调整位置与光照", "error");
+        setCameraHint("未检测到人脸，请正对镜头并靠近一点", "error");
+        lastActiveCell = null;
+        lastMetrics = null;
+        meshScale += (1.0 - meshScale) * 0.08;
+        renderCoverageGrid();
+        drawVirtualMesh();
+        return;
+      }
+
+      const metrics = analyzeFace(lms);
+      drawFaceOverlay(metrics);
+      updateGuideMetrics(metrics);
+      maybeAutoCapture(metrics);
+    }
+
+    async function analysisLoop() {
+      if (!analysisEnabled) return;
+      if (!faceMesh || analysisInFlight || !preview.srcObject || preview.readyState < 2) {
+        analysisLoopHandle = requestAnimationFrame(analysisLoop);
+        return;
+      }
+
+      analysisInFlight = true;
+      try {
+        await faceMesh.send({ image: preview });
+      } catch (e) {
+        setGuideMessage(`实时引导异常: ${e.message}`, "error");
+      } finally {
+        analysisInFlight = false;
+      }
+      analysisLoopHandle = requestAnimationFrame(analysisLoop);
+    }
+
+    function startAnalysis() {
+      if (analysisEnabled) return;
+      analysisEnabled = true;
+      if (analysisLoopHandle) {
+        cancelAnimationFrame(analysisLoopHandle);
+      }
+      analysisLoopHandle = requestAnimationFrame(analysisLoop);
+    }
+
+    function stopAnalysis() {
+      analysisEnabled = false;
+      if (analysisLoopHandle) {
+        cancelAnimationFrame(analysisLoopHandle);
+        analysisLoopHandle = null;
+      }
+    }
+
+    function extFromBlobType(blobType) {
+      const t = (blobType || "").toLowerCase();
+      if (t === "image/jpeg") return ".jpg";
+      if (t === "image/webp") return ".webp";
+      if (t === "image/bmp") return ".bmp";
+      if (t === "image/tiff") return ".tiff";
+      if (t === "image/png") return ".png";
+      return ".png";
+    }
+
+    async function captureStillBlob() {
+      if (imageCapture && typeof imageCapture.takePhoto === "function") {
+        try {
+          const photoBlob = await imageCapture.takePhoto();
+          if (photoBlob && photoBlob.size > 0) {
+            return photoBlob;
+          }
+        } catch (_) {
+          // Fallback to preview frame if ImageCapture is unsupported or fails.
+        }
+      }
+
+      if (!preview.videoWidth || !preview.videoHeight) {
+        return null;
+      }
+      const shotCanvas = document.createElement("canvas");
+      shotCanvas.width = preview.videoWidth;
+      shotCanvas.height = preview.videoHeight;
+      const cctx = shotCanvas.getContext("2d");
+      cctx.drawImage(preview, 0, 0, shotCanvas.width, shotCanvas.height);
+      return await new Promise((resolve) => {
+        shotCanvas.toBlob((b) => resolve(b), "image/png", 0.95);
+      });
+    }
+
+    async function captureShotForMetrics(metrics, targetCell = null) {
+      if (!metrics || !metrics.passFrame) {
+        return null;
+      }
+      if (!stream || !preview.videoWidth || !preview.videoHeight) {
+        return null;
+      }
+
+      const r = targetCell ? targetCell.r : metrics.pitchIdx;
+      const c = targetCell ? targetCell.c : metrics.yawIdx;
+      const key = cellKey(r, c);
+      const score = computeShotScore(metrics);
+      const candidateShot = {
+        score,
+        poseYaw: metrics.yaw,
+        posePitch: metrics.pitch,
+        poseRoll: metrics.roll,
+      };
+      const now = performance.now();
+      const captureDecision = shouldCaptureIntoPool(key, candidateShot, now);
+      if (!captureDecision.shouldCapture) return null;
+
+      const blob = await captureStillBlob();
+      if (!blob) {
+        throw new Error("图像编码失败");
+      }
+
+      const yawTag = GUIDE.yawBins[c];
+      const pitchTag = GUIDE.pitchBins[r];
+      const yawDeg = Math.round(yawTag);
+      const pitchDeg = Math.round(pitchTag);
+      const ext = extFromBlobType(blob.type);
+      captureSeq += 1;
+      const shot = {
+        blob,
+        filename: `view_y${yawDeg >= 0 ? "+" : ""}${yawDeg}_p${pitchDeg >= 0 ? "+" : ""}${pitchDeg}_n${String(captureSeq).padStart(4, "0")}${ext}`,
+        yaw: yawDeg,
+        pitch: pitchDeg,
+        score,
+        poseYaw: metrics.yaw,
+        posePitch: metrics.pitch,
+        poseRoll: metrics.roll,
+        ts: Date.now(),
+      };
+      upsertCandidateInCell(key, shot, captureDecision.replaceIndex);
+      refreshCoverageFromShots();
+      return {
+        r,
+        c,
+        yawTag,
+        pitchTag,
+        score,
+        candidateCount: getCellCandidates(key).length,
+        replaced: captureDecision.replaceIndex >= 0,
+      };
+    }
+
+    async function maybeAutoCapture(metrics) {
+      if (!metrics || !metrics.passFrame) {
+        return;
+      }
+      if (autoCaptureInFlight) {
+        return;
+      }
+
+      const now = performance.now();
+      if (now - lastAutoCaptureAt < AUTO_CAPTURE_COOLDOWN_MS) {
+        return;
+      }
+
+      autoCaptureInFlight = true;
+      try {
+        const saved = await captureShotForMetrics(metrics);
+        if (saved) {
+          const gate = getUploadGateState();
+          const totalShots = getTotalShotCount();
+          const cellShots = getCellShotCount(cellKey(saved.r, saved.c));
+          const cellPoolCount = saved.candidateCount || 0;
+          uploadStatus.textContent =
+            `自动采集: ${sectorLabel(saved.r)} ${formatAngle(saved.yawTag)}°（保留 ${cellShots}/${CAPTURE_POLICY.topKPerCell}，候选 ${cellPoolCount}/${CAPTURE_POLICY.candidatePoolPerCell}，总计 ${totalShots} 张）`;
+          if (gate.ok) {
+            setGuideMessage(
+              `已满足上传门槛（${gate.totalShots} 张，覆盖 ${(gate.coverageRatio * 100).toFixed(0)}%），可上传重建。`,
+              "ok"
+            );
+          }
+        }
+      } catch (e) {
+        uploadStatus.textContent = `自动采集失败: ${e.message}`;
+      } finally {
+        lastAutoCaptureAt = performance.now();
+        autoCaptureInFlight = false;
+      }
+    }
+
+    function cameraFacingText(mode) {
+      return mode === "user" ? "前置" : "后置";
+    }
+
+    function inferFacingMode(mediaStream, fallbackMode) {
+      const track = mediaStream && mediaStream.getVideoTracks ? mediaStream.getVideoTracks()[0] : null;
+      if (!track || !track.getSettings) return fallbackMode;
+      const settings = track.getSettings();
+      if (!settings || typeof settings.facingMode !== "string") return fallbackMode;
+      return settings.facingMode === "user" ? "user" : (settings.facingMode === "environment" ? "environment" : fallbackMode);
+    }
+
+    function updateSwitchCamButtonText() {
+      const baseMode = currentFacingMode || preferredFacingMode;
+      const nextMode = baseMode === "environment" ? "user" : "environment";
+      switchCamBtn.textContent = `切换到${cameraFacingText(nextMode)}`;
+    }
+
+    async function requestCameraStream(facingMode) {
+      const baseVideoConstraints = {};
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            ...baseVideoConstraints,
+            facingMode: { exact: facingMode },
+          },
+        });
+      } catch (e) {
+        if (e && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              ...baseVideoConstraints,
+              facingMode: { ideal: facingMode },
+            },
+          });
+        }
+        throw e;
+      }
+    }
+
+    function closeCameraStream({ updateHint = true } = {}) {
+      stopAnalysis();
+      imageCapture = null;
+      if (stream) {
+        for (const track of stream.getTracks()) {
+          track.stop();
+        }
+        stream = null;
+      }
+      preview.srcObject = null;
+      currentFacingMode = null;
+      switchCamBtn.disabled = true;
+      updateSwitchCamButtonText();
+      clearOverlay();
+      drawVirtualMesh();
+      if (updateHint) {
+        setCameraHint("摄像头已关闭，正在上传图片", "warn");
+      }
+    }
+
+    async function openCamera({ keepProgress = false } = {}) {
+      switchCamBtn.disabled = true;
+      closeCameraStream({ updateHint: false });
+
+      stream = await requestCameraStream(preferredFacingMode);
+      const videoTrack = stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+      if (videoTrack && typeof window.ImageCapture === "function") {
+        try {
+          imageCapture = new window.ImageCapture(videoTrack);
+        } catch (_) {
+          imageCapture = null;
+        }
+      }
+      currentFacingMode = inferFacingMode(stream, preferredFacingMode);
+      preferredFacingMode = currentFacingMode;
+      updateSwitchCamButtonText();
+      applyPreviewOrientation();
+      preview.srcObject = stream;
+      preview.onloadedmetadata = () => {
+        syncOverlaySize();
+        clearOverlay();
+        drawVirtualMesh();
+      };
+      setCameraHint("保持人脸在中间，系统会提示远近并自动拍摄", "warn");
+      switchCamBtn.disabled = false;
+
+      if (!keepProgress) {
+        resetCoverage();
+      }
+      await initFaceMesh();
+      startAnalysis();
+    }
+
+    async function uploadCapturedImages() {
+      const totalShots = getTotalShotCount();
+      if (totalShots === 0) {
+        uploadStatus.textContent = "请先采集至少一张图片";
+        return;
+      }
+      const gate = getUploadGateState();
+      if (!gate.ok) {
+        uploadStatus.textContent = `未达高质量上传门槛：${gate.reasons.join("；")}`;
+        return;
+      }
+
+      closeCameraStream({ updateHint: true });
+
+      const fd = new FormData();
+      const guideMeta = [];
+      const modeInfo = getCaptureModeInfo();
+      for (const [key, shots] of capturedShots.entries()) {
+        for (const shot of shots) {
+          fd.append("images", shot.blob, shot.filename);
+          guideMeta.push({
+            key,
+            yaw: shot.yaw,
+            pitch: shot.pitch,
+            score: Number(shot.score || 0),
+            filename: shot.filename,
+          });
+        }
+      }
+      fd.append("func", "mat-face-recon-uv-tex");
+      fd.append(
+        "guide_meta_json",
+        JSON.stringify({
+          capture_mode: modeInfo.mode,
+          capture_mode_label: modeInfo.label,
+          captured: guideMeta,
+        })
+      );
+
+      uploadStatus.textContent = "上传图片中...";
+      const res = await fetch(api("/api/jobs/images"), {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`创建图片任务失败: ${errText}`);
+      }
+      const data = await res.json();
+      currentJobId = data.job_id;
+      resetTimeProgressForJob(currentJobId);
+      jobIdEl.textContent = currentJobId;
+      setStatus("queued", "warn");
+      jobModuleEl.textContent = "-";
+      jobPercentEl.textContent = "0.0%";
+      progressInner.style.width = "0%";
+      jobEtaEl.textContent = "计算中...";
+      uploadStatus.textContent = `任务已创建: ${currentJobId}（模式 ${modeInfo.label}，图片数 ${totalShots}）`;
+      artifactsEl.innerHTML = "";
+      resetResultViewer();
+      startPolling();
+    }
+
+    async function pollJob() {
+      if (!currentJobId) return;
+
+      const infoRes = await fetch(api(`/api/jobs/${currentJobId}`));
+      if (infoRes.ok) {
+        const job = await infoRes.json();
+        const st = job.status || "-";
+        const p = job.progress || {};
+
+        jobModuleEl.textContent = p.module || "-";
+        const tProgress = computeTimeProgress(job, st, p);
+        jobPercentEl.textContent = `${tProgress.percent.toFixed(1)}%`;
+        progressInner.style.width = `${tProgress.percent.toFixed(1)}%`;
+        jobEtaEl.textContent = tProgress.etaText;
+
+        if (st === "succeeded") setStatus(st, "ok");
+        else if (st === "failed") setStatus(st, "error");
+        else setStatus(st, "warn");
+
+        if (st === "succeeded") {
+          await loadResult();
+          stopPolling();
+        }
+        if (st === "failed") {
+          stopPolling();
+        }
+      }
+    }
+
+    async function loadResult() {
+      const res = await fetch(api(`/api/jobs/${currentJobId}/result`));
+      if (!res.ok) return;
+      const data = await res.json();
+      const items = data.artifacts || [];
+      artifactsEl.innerHTML = "<h3 style='margin:4px 0 8px;'>结果文件</h3>";
+      for (const it of items) {
+        const a = document.createElement("a");
+        a.href = api(it.download_url);
+        a.textContent = `${it.path} (${it.size} bytes)`;
+        a.target = "_blank";
+        artifactsEl.appendChild(a);
+      }
+
+      const objArtifact = pickArtifact(
+        items,
+        ["texture_dataset/final_textured.obj", "texture_dataset/final_hack.obj"],
+        ".obj"
+      );
+      const texArtifact = pickArtifact(
+        items,
+        ["texture_dataset/final_hack_texture.png"],
+        ".png"
+      );
+      setQuickDownloadButtons(objArtifact, texArtifact);
+
+      if (!objArtifact) {
+        setResultViewerHint("未找到可预览的 OBJ 文件，请直接下载结果文件查看。");
+        clearResultMesh();
+        return;
+      }
+      try {
+        await loadResultViewerMesh(
+          api(objArtifact.download_url),
+          texArtifact ? api(texArtifact.download_url) : ""
+        );
+      } catch (e) {
+        clearResultMesh();
+        setResultViewerHint(`3D 预览加载失败：${e.message || e}`);
+      }
+    }
+
+    function startPolling() {
+      stopPolling();
+      pollTimer = setInterval(() => {
+        pollJob().catch((e) => {
+          uploadStatus.textContent = `轮询失败: ${e.message}`;
+        });
+      }, 2000);
+      pollJob().catch((e) => {
+        uploadStatus.textContent = `轮询失败: ${e.message}`;
+      });
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    openCamBtn.addEventListener("click", async () => {
+      try {
+        syncCaptureModeFromInputs();
+        updateCaptureModeDescription();
+        const modeInfo = getCaptureModeInfo();
+        await openCamera();
+        uploadStatus.textContent = `摄像头已开启（${cameraFacingText(currentFacingMode)}），模式：${modeInfo.label}，连续采样中（每视角自动保留最清晰Top-K）`;
+      } catch (e) {
+        uploadStatus.textContent = `打开摄像头失败: ${e.message}`;
+        setGuideMessage(`实时引导初始化失败: ${e.message}`, "error");
+      }
+    });
+
+    switchCamBtn.addEventListener("click", async () => {
+      try {
+        const mode = currentFacingMode || preferredFacingMode;
+        preferredFacingMode = mode === "environment" ? "user" : "environment";
+        await openCamera({ keepProgress: true });
+        const modeInfo = getCaptureModeInfo();
+        uploadStatus.textContent = `已切换到${cameraFacingText(currentFacingMode)}摄像头，模式：${modeInfo.label}，连续采样中（每视角自动保留最清晰Top-K）`;
+      } catch (e) {
+        uploadStatus.textContent = `切换摄像头失败: ${e.message}`;
+      }
+    });
+
+    for (const input of captureModeInputs) {
+      input.addEventListener("change", () => {
+        syncCaptureModeFromInputs();
+        updateCaptureModeDescription();
+        const info = getCaptureModeInfo();
+        if (!analysisEnabled) {
+          setGuideMessage(`当前模式：${info.label}。${info.desc}`, "warn");
+        }
+      });
+    }
+
+    clearCaptureBtn.addEventListener("click", () => {
+      resetCoverage();
+      uploadStatus.textContent = "已清空采集列表";
+    });
+
+    uploadCaptureBtn.addEventListener("click", () => {
+      uploadCaptureBtn.disabled = true;
+      uploadCapturedImages().catch((e) => {
+        uploadStatus.textContent = `上传失败: ${e.message}`;
+      }).finally(() => {
+        uploadCaptureBtn.disabled = !getUploadGateState().ok;
+      });
+    });
+
+    window.addEventListener("resize", () => {
+      applyFanGridLayout();
+      syncOverlaySize();
+      clearOverlay();
+      drawVirtualMesh();
+      syncResultViewerSize();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      closeCameraStream({ updateHint: false });
+    });
+
+    initGuideGrid();
+    syncCaptureModeFromInputs();
+    updateCaptureModeDescription();
+    resetCoverage();
+    resetResultViewer();
+    syncResultViewerSize();
+    updateSwitchCamButtonText();
+    clearOverlay();
+    drawVirtualMesh();
+  </script>
+</body>
+</html>

@@ -3,21 +3,36 @@ import datetime
 import os
 import subprocess
 import sys
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, Optional
 
 
-def parse_modules(func_arg: str) -> List[str]:
-    supported = ["extract", "mat", "face", "recon", "uv", "tex"]
+SUPPORTED_MODULES = ("mat", "face", "colmap", "2dgs", "uv", "tex")
+
+
+def parse_modules(func_arg: str) -> list[str]:
     items = [x.strip() for x in func_arg.replace(",", "-").split("-") if x.strip()]
     if not items:
         raise ValueError("`--func` 不能为空")
-    invalid = sorted(set(items) - set(supported))
-    if invalid:
-        raise ValueError(f"不支持的模块: {invalid}；可选模块: {supported}")
-    deduped = []
+
+    invalid: list[str] = []
+    deduped: list[str] = []
     for item in items:
-        if item not in deduped:
-            deduped.append(item)
+        key = item.strip().lower()
+        if key in SUPPORTED_MODULES:
+            if key not in deduped:
+                deduped.append(key)
+            continue
+
+        invalid.append(item)
+
+    if invalid:
+        raise ValueError(
+            "不支持的模块: {}；可选模块: {}".format(
+                sorted(set(invalid)),
+                list(SUPPORTED_MODULES),
+            )
+        )
+
     return deduped
 
 
@@ -44,71 +59,168 @@ def run_step(
     write_log(log_path, f"[Module: {module_name}] runtime: {m_end - m_start}")
 
 
-def probe_video_resolution(video_path: str) -> Tuple[int, int]:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=width,height",
-            "-of",
-            "csv=p=0:s=x",
-            video_path,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    width_text, height_text = result.stdout.strip().split("x")
-    return int(width_text), int(height_text)
+def _is_int_csv(text: str) -> bool:
+    if not text:
+        return False
+    items = [x.strip() for x in text.split(",")]
+    if not items:
+        return False
+    return all(x.isdigit() for x in items)
 
 
-def resolve_video_ds_ratio(video_path: str, manual_ratio: float, video_max_side: int) -> Tuple[float, int, int]:
-    width, height = probe_video_resolution(video_path)
-    if manual_ratio > 0:
-        return manual_ratio, width, height
+def _pick_best_gpu_index() -> Optional[str]:
+    """
+    Pick one GPU by a simple load score:
+      score = memory_used_mb + 20 * utilization_percent
+    Lower score is preferred.
+    """
+    try:
+        res = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,memory.used,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception:
+        return None
 
-    long_side = max(width, height)
-    if long_side <= video_max_side:
-        return 1.0, width, height
-    return video_max_side / float(long_side), width, height
+    if res.returncode != 0 or not res.stdout:
+        return None
+
+    best_idx = None
+    best_score = None
+    for raw in res.stdout.splitlines():
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) < 3:
+            continue
+        idx, mem_s, util_s = parts[0], parts[1], parts[2]
+        if not idx.isdigit():
+            continue
+        try:
+            mem = float(mem_s)
+            util = float(util_s)
+        except Exception:
+            continue
+        score = mem + 20.0 * util
+        if best_score is None or score < best_score:
+            best_score = score
+            best_idx = idx
+    return best_idx
 
 
-def clear_generated_images(root: str) -> None:
-    if not os.path.isdir(root):
+def resolve_gpu_policy(gpu_policy: str, env: dict) -> tuple[Optional[str], str]:
+    """
+    Return:
+      (cuda_visible_devices_value_or_none, description)
+    """
+    policy = (gpu_policy or "auto").strip().lower()
+    existing = (env.get("CUDA_VISIBLE_DEVICES") or "").strip()
+
+    if policy == "inherit":
+        if existing:
+            return existing, f"inherit CUDA_VISIBLE_DEVICES={existing}"
+        return None, "inherit CUDA_VISIBLE_DEVICES (未设置)"
+
+    if policy == "auto":
+        if existing:
+            return existing, f"auto 检测到已有 CUDA_VISIBLE_DEVICES={existing}，直接使用"
+        picked = _pick_best_gpu_index()
+        if picked is None:
+            return None, "auto 选卡失败（nvidia-smi 不可用），沿用系统默认设备"
+        return picked, f"auto 选择 GPU={picked}"
+
+    if policy == "cpu":
+        return "", "强制 CPU（CUDA_VISIBLE_DEVICES=''）"
+
+    if _is_int_csv(policy):
+        return policy, f"手动指定 GPU={policy}"
+
+    raise ValueError("`--gpu` 仅支持 auto|inherit|cpu|<gpu_id[,gpu_id...]>")
+
+
+def _resize_raw_frames_max_side(raw_root: str, max_side: int, log_path: str) -> None:
+    if max_side <= 0:
+        write_log(log_path, f"[Preprocess] skip resize: max_side={max_side}")
         return
-    for name in os.listdir(root):
-        lower_name = name.lower()
-        if lower_name.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff")):
-            os.remove(os.path.join(root, name))
+    if not os.path.isdir(raw_root):
+        write_log(log_path, f"[Preprocess] skip resize: raw frame dir not found: {raw_root}")
+        return
+
+    try:
+        import cv2  # type: ignore
+    except Exception as e:
+        raise RuntimeError(f"需要 opencv-python 来缩放 raw_frames，但导入失败: {e}") from e
+
+    exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff")
+    names = [
+        n
+        for n in sorted(os.listdir(raw_root))
+        if os.path.isfile(os.path.join(raw_root, n)) and n.lower().endswith(exts)
+    ]
+    if not names:
+        write_log(log_path, f"[Preprocess] skip resize: no images in {raw_root}")
+        return
+
+    resized = 0
+    skipped = 0
+    for name in names:
+        path = os.path.join(raw_root, name)
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            skipped += 1
+            continue
+        h, w = img.shape[:2]
+        long_side = max(h, w)
+        if long_side <= max_side:
+            skipped += 1
+            continue
+
+        scale = max_side / float(long_side)
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+        ext = os.path.splitext(name)[1].lower()
+        if ext in (".jpg", ".jpeg"):
+            ok = cv2.imwrite(path, resized_img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        elif ext == ".png":
+            ok = cv2.imwrite(path, resized_img, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        else:
+            ok = cv2.imwrite(path, resized_img)
+        if not ok:
+            raise RuntimeError(f"缩放后写入失败: {path}")
+        resized += 1
+
+    write_log(
+        log_path,
+        f"[Preprocess] resize raw_frames to max_side={max_side}: resized={resized}, unchanged_or_invalid={skipped}, total={len(names)}",
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--video_path", type=str, help="输入视频路径")
-    parser.add_argument("--candidate_step_size", default=10, type=int, help="自适应抽帧的候选帧步长")
-    parser.add_argument(
-        "--video_ds_ratio",
-        default=0.5,
-        type=float,
-        help="视频下采样比例；<=0 时自动按 `video_max_side` 决定是否下采样",
-    )
-    parser.add_argument(
-        "--video_max_side",
-        default=1280,
-        type=int,
-        help="自动下采样时允许的最长边分辨率",
-    )
     parser.add_argument("--save_root", type=str, required=True, help="结果保存根目录")
-    parser.add_argument("--func", type=str, default="extract-mat-face-recon-uv-tex", help="执行模块")
+    parser.add_argument("--func", type=str, default="mat-face-colmap-2dgs-uv-tex", help="执行模块")
+    parser.add_argument(
+        "--gpu",
+        type=str,
+        default="auto",
+        help="GPU 策略: auto|inherit|cpu|<gpu_id[,gpu_id...]>",
+    )
+    parser.add_argument(
+        "--max_image_side",
+        type=int,
+        default=1280,
+        help="raw_frames 预处理: 长边最大值（短边等比缩放）",
+    )
     opt = parser.parse_args()
 
     modules = parse_modules(opt.func)
-    if "extract" in modules and not opt.video_path:
-        parser.error("当包含 extract 模块时，必须提供 --video_path")
 
     save_root = os.path.abspath(opt.save_root)
     os.makedirs(save_root, exist_ok=True)
@@ -121,98 +233,86 @@ def main() -> None:
 
     code_root = os.path.dirname(os.path.abspath(__file__))
     python_bin = sys.executable
+    run_env = os.environ.copy()
+    cuda_visible_devices, gpu_note = resolve_gpu_policy(opt.gpu, run_env)
+    if cuda_visible_devices is not None:
+        run_env["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+    write_log(log_path, f"[GPU] policy={opt.gpu}; {gpu_note}")
 
     raw_frame_root = os.path.join(save_root, "raw_frames")
     mask_save_root = os.path.join(save_root, "wholebody_mask")
     face_mask_save_root = os.path.join(save_root, "face_mask")
+    tex_data_root = os.path.join(save_root, "texture_dataset")
+    _resize_raw_frames_max_side(raw_frame_root, int(opt.max_image_side), log_path)
+
+    module_specs = {
+        "mat": {
+            "cwd": os.path.join(code_root, "matting"),
+            "cmd": [
+                python_bin,
+                "run_matting.py",
+                "--input_root",
+                raw_frame_root,
+                "--output_root",
+                mask_save_root,
+            ],
+        },
+        "face": {
+            "cwd": os.path.join(code_root, "face_mask"),
+            "cmd": [
+                python_bin,
+                "run_face_detection.py",
+                "--input_root",
+                raw_frame_root,
+                "--output_root",
+                face_mask_save_root,
+                "--batch_size",
+                "12",
+                "--det_max_size",
+                "960",
+            ],
+        },
+        "colmap": {
+            "cwd": os.path.join(code_root, "reconstruction"),
+            "cmd": [
+                python_bin,
+                "run_reconstruction.py",
+                "--data_root",
+                save_root,
+                "--stage",
+                "colmap",
+            ],
+        },
+        "2dgs": {
+            "cwd": os.path.join(code_root, "reconstruction"),
+            "cmd": [
+                python_bin,
+                "run_reconstruction.py",
+                "--data_root",
+                save_root,
+                "--stage",
+                "2dgs",
+            ],
+        },
+        "uv": {
+            "cwd": os.path.join(code_root, "uvexport"),
+            "cmd": [python_bin, "run_uv_pipeline.py", "--data_root", save_root],
+        },
+        "tex": {
+            "cwd": os.path.join(code_root, "texture"),
+            "cmd": [python_bin, "run_texture.py", "--data_root", tex_data_root],
+        },
+    }
 
     try:
-        if "extract" in modules:
-            os.makedirs(raw_frame_root, exist_ok=True)
-            clear_generated_images(raw_frame_root)
-            ds_ratio, video_width, video_height = resolve_video_ds_ratio(
-                opt.video_path,
-                manual_ratio=opt.video_ds_ratio,
-                video_max_side=opt.video_max_side,
-            )
-            write_log(
-                log_path,
-                (
-                    f"[Module: extract] video_resolution={video_width}x{video_height}, "
-                    f"ds_ratio={ds_ratio:.4f}, video_max_side={opt.video_max_side}"
-                ),
-            )
+        for module_name in modules:
+            spec = module_specs[module_name]
             run_step(
-                module_name="extract",
+                module_name=module_name,
                 log_path=log_path,
-                cwd=os.path.join(code_root, "extract"),
-                cmd=[
-                    python_bin,
-                    "adaptive_extract.py",
-                    "--video_path",
-                    opt.video_path,
-                    "--output_root",
-                    raw_frame_root,
-                    "--candidate_step_size",
-                    str(opt.candidate_step_size),
-                    "--video_ds_ratio",
-                    str(ds_ratio),
-                ],
-            )
-
-        if "mat" in modules:
-            run_step(
-                module_name="mat",
-                log_path=log_path,
-                cwd=os.path.join(code_root, "matting"),
-                cmd=[
-                    python_bin,
-                    "run_matting.py",
-                    "--input_root",
-                    raw_frame_root,
-                    "--output_root",
-                    mask_save_root,
-                ],
-            )
-
-        if "face" in modules:
-            run_step(
-                module_name="face",
-                log_path=log_path,
-                cwd=os.path.join(code_root, "face_mask"),
-                cmd=[
-                    python_bin,
-                    "run_face_detection.py",
-                    "--input_root",
-                    raw_frame_root,
-                    "--output_root",
-                    face_mask_save_root,
-                ],
-            )
-
-        if "recon" in modules:
-            run_step(
-                module_name="recon",
-                log_path=log_path,
-                cwd=os.path.join(code_root, "reconstruction"),
-                cmd=[python_bin, "run_reconstruction.py", "--data_root", save_root],
-            )
-
-        if "uv" in modules:
-            run_step(
-                module_name="uv",
-                log_path=log_path,
-                cwd=os.path.join(code_root, "uvexport"),
-                cmd=[python_bin, "run_uv_pipeline.py", "--data_root", save_root],
-            )
-
-        if "tex" in modules:
-            tex_data_root = os.path.join(save_root, "texture_dataset")
-            run_step(
-                module_name="tex",
-                log_path=log_path,
-                cwd=os.path.join(code_root, "texture"),
-                cmd=[python_bin, "run_texture.py", "--data_root", tex_data_root],
+                cwd=spec["cwd"],
+                cmd=spec["cmd"],
+                env=run_env,
             )
     finally:
         end_all = datetime.datetime.now()

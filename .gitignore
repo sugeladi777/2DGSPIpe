@@ -1,20 +1,43 @@
-input/*
-output/*
-doc/*
-2DGSPipe/matting/model
-2DGSPipe/reconstruction/2d-gaussian-splatting/submodules/
-2DGSPipe/reconstruction/2d-gaussian-splatting/assets/
-2DGSPipe/reconstruction/2d-gaussian-splatting/**/__pycache__/
-2DGSPipe/uvexport/blender-3.1.0-linux-x64/
-2DGSPipe/uvexport/blender-5.0.1-linux-x64/
+# =========================
+# OS / IDE
+# =========================
+.DS_Store
+.vscode/
 
-# Python 缓存与临时文件
+# =========================
+# Python
+# =========================
 __pycache__/
-**/__pycache__/
 *.py[cod]
 *$py.class
-# Jupyter Notebook 检查点
 .ipynb_checkpoints/
+.venv/
+.venv-service/
 
-# VSCode 配置
-.vscode/
+# =========================
+# Runtime data / outputs
+# =========================
+input/
+output/
+service_data/
+
+# =========================
+# Documentation build artifacts
+# =========================
+doc/build/
+doc/generated/
+
+# =========================
+# Project-specific large binaries / third-party runtime
+# =========================
+2DGSPipe/matting/model/
+2DGSPipe/reconstruction/colmap/build/
+2DGSPipe/reconstruction/2d-gaussian-splatting/submodules/
+2DGSPipe/reconstruction/2d-gaussian-splatting/assets/
+2DGSPipe/uvexport/blender-5.0.1-linux-x64/
+doc/
+
+# =========================
+# Local service config
+# =========================
+service/.env

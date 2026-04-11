@@ -19,7 +19,9 @@ def main():
     parser.add_argument("--input_root", required=True, help="Path to input images")
     parser.add_argument("--output_root", required=True, help="Path to save face masks")
     parser.add_argument("--gpu_id", type=int, default=0)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=12)
+    parser.add_argument("--det_max_size", type=int, default=960)
+    parser.add_argument("--det_threshold", type=float, default=0.6)
     args = parser.parse_args()
 
     os.makedirs(args.output_root, exist_ok=True)
@@ -55,7 +57,10 @@ def main():
 
         with torch.inference_mode():
             all_faces = face_detector(
-                batch_images, threshold=0.6, max_size=1080, batch_size=len(batch_images)
+                batch_images,
+                threshold=float(args.det_threshold),
+                max_size=int(args.det_max_size),
+                batch_size=len(batch_images),
             )
             try:
                 all_faces = face_parser(batch_images, all_faces)

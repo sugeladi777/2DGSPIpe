@@ -1,0 +1,15 @@
+[Unit]
+Description=RGB Recon RQ Worker
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=lichengkai
+WorkingDirectory=/home/lichengkai/RGB_Recon
+EnvironmentFile=/home/lichengkai/RGB_Recon/service/.env
+ExecStart=/home/lichengkai/anaconda3/envs/2DGSPipe/bin/rq worker --url ${REDIS_URL} ${RQ_QUEUE_NAME}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

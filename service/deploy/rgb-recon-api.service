@@ -1,0 +1,15 @@
+[Unit]
+Description=RGB Recon API
+After=network.target
+
+[Service]
+Type=simple
+User=lichengkai
+WorkingDirectory=/home/lichengkai/RGB_Recon
+EnvironmentFile=/home/lichengkai/RGB_Recon/service/.env
+ExecStart=/home/lichengkai/anaconda3/envs/2DGSPipe/bin/python -m uvicorn service.api.app:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

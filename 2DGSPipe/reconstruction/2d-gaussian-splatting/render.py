@@ -100,9 +100,12 @@ if __name__ == "__main__":
             sdf_trunc = 5.0 * voxel_size if args.sdf_trunc < 0 else args.sdf_trunc
             mesh = gaussExtractor.extract_mesh_bounded(voxel_size=voxel_size, sdf_trunc=sdf_trunc, depth_trunc=depth_trunc)
         
-        o3d.io.write_triangle_mesh(os.path.join(train_dir, name), mesh)
-        print("mesh saved at {}".format(os.path.join(train_dir, name)))
+        raw_mesh_path = os.path.join(train_dir, name)
+        post_mesh_path = os.path.join(train_dir, name.replace('.ply', '_post.ply'))
+
+        o3d.io.write_triangle_mesh(raw_mesh_path, mesh)
+        print("mesh saved at {}".format(raw_mesh_path))
         # post-process the mesh and save, saving the largest N clusters
         mesh_post = post_process_mesh(mesh, cluster_to_keep=args.num_cluster)
-        o3d.io.write_triangle_mesh(os.path.join(train_dir, name.replace('.ply', '_post.ply')), mesh_post)
-        print("mesh post processed saved at {}".format(os.path.join(train_dir, name.replace('.ply', '_post.ply'))))
+        o3d.io.write_triangle_mesh(post_mesh_path, mesh_post)
+        print("mesh post processed saved at {}".format(post_mesh_path))

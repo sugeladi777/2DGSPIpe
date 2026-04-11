@@ -20,21 +20,15 @@ def main() -> None:
     if not os.path.isdir(image_root):
         raise FileNotFoundError(f"Selected image directory not found: {image_root}")
 
-    selected_meta_path = os.path.join(save_root, "select_sharp.json")
-    if os.path.isfile(selected_meta_path):
-        with open(selected_meta_path, "r") as f:
-            meta = json.load(f)
-        filtered_frames = meta.get("frames", [])
-    else:
-        with open(src_transforms, "r") as f:
-            meta = json.load(f)
+    with open(src_transforms, "r") as f:
+        meta = json.load(f)
 
-        img_files = {
-            name
-            for name in os.listdir(image_root)
-            if os.path.isfile(os.path.join(image_root, name))
-        }
-        filtered_frames = [f for f in meta.get("frames", []) if os.path.basename(f["file_path"]) in img_files]
+    img_files = {
+        name
+        for name in os.listdir(image_root)
+        if os.path.isfile(os.path.join(image_root, name))
+    }
+    filtered_frames = [f for f in meta.get("frames", []) if os.path.basename(f["file_path"]) in img_files]
     if not filtered_frames:
         raise RuntimeError("No frames left after filtering by selected images.")
 
