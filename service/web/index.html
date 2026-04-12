@@ -64,6 +64,11 @@
       cursor: not-allowed;
       opacity: 0.55;
     }
+    button.secondary {
+      color: #23416f;
+      border-color: #b8c8e4;
+      background: #f3f7ff;
+    }
     .video-wrap {
       position: relative;
       width: 100%;
@@ -290,6 +295,73 @@
       background: linear-gradient(90deg, #2e90ff, #66b3ff);
       transition: width 0.25s;
     }
+    .history-tools {
+      margin-top: 10px;
+      margin-bottom: 8px;
+      gap: 6px;
+    }
+    .history-tools input {
+      flex: 1 1 280px;
+      min-width: 220px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+    }
+    .history-tools button {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+    .recent-jobs {
+      display: grid;
+      gap: 8px;
+    }
+    .recent-empty {
+      font-size: 12px;
+      color: #5f7088;
+      border: 1px dashed #cfdbf2;
+      border-radius: 8px;
+      background: #f7faff;
+      padding: 8px;
+    }
+    .recent-job-item {
+      border: 1px solid #d8e4f7;
+      border-radius: 8px;
+      background: #f7faff;
+      padding: 8px;
+    }
+    .recent-job-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .recent-job-id {
+      font-size: 12px;
+      font-weight: 700;
+      color: #1e3458;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      word-break: break-all;
+    }
+    .recent-job-meta {
+      font-size: 12px;
+      color: #5f7088;
+      line-height: 1.4;
+    }
+    .recent-job-actions {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .recent-job-actions button {
+      font-size: 12px;
+      padding: 5px 9px;
+    }
+    .recent-job-actions button.secondary {
+      color: #23416f;
+      border-color: #b8c8e4;
+      background: #f3f7ff;
+    }
     .artifacts a { display: block; margin: 4px 0; }
     .result-preview {
       margin-top: 10px;
@@ -509,6 +581,11 @@
         <div>预计剩余: <span id="jobEta">-</span></div>
       </div>
       <div class="progress" style="margin-top:8px;"><div id="progressInner"></div></div>
+      <div class="history-tools row">
+        <input id="resumeJobInput" type="text" placeholder="输入历史 Job ID 后恢复查看" />
+        <button id="resumeJobBtn" class="secondary">恢复任务</button>
+      </div>
+      <div id="recentJobs" class="recent-jobs"></div>
       <div class="artifacts" id="artifacts" style="margin-top:10px;"></div>
       <div class="result-preview">
         <canvas id="resultViewer"></canvas>
@@ -539,6 +616,8 @@
   </div>
 
   <script src="assets/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/MTLLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
   <script>
     function buildLinearBins(minValue, maxValue, count) {
@@ -576,6 +655,7 @@
       minShots: 40,
       minCoverageRatio: 0.8,
       minPerPitchShots: 6,
+      minLongSide: 1280,
     };
     const CAPTURE_POLICY = {
       topKPerCell: 3,
@@ -630,6 +710,9 @@
     const resultViewerCanvas = document.getElementById("resultViewer");
     const resultViewerHintEl = document.getElementById("resultViewerHint");
     const resultQuickDownloadsEl = document.getElementById("resultQuickDownloads");
+    const resumeJobInputEl = document.getElementById("resumeJobInput");
+    const resumeJobBtn = document.getElementById("resumeJobBtn");
+    const recentJobsEl = document.getElementById("recentJobs");
 
     const guideMessageEl = document.getElementById("guideMessage");
     const mFaceRatioEl = document.getElementById("mFaceRatio");
@@ -702,6 +785,8 @@
     let resultRoot = null;
     let resultActiveMesh = null;
     let resultAnimHandle = null;
+    const RESULT_FRONT_YAW_OFFSET = 0;
+    const RESULT_PITCH_LIMIT = 1.15;
     const resultViewState = {
       yaw: 0,
       pitch: 0,
@@ -712,7 +797,11 @@
       dragging: false,
       lastX: 0,
       lastY: 0,
+      pointerId: null,
     };
+    const JOB_HISTORY_KEY = "rgb_recon_recent_jobs_v1";
+    const JOB_HISTORY_LIMIT = 20;
+    let recentJobs = [];
 
     const coverageCounts = Array.from({ length: GUIDE.pitchBins.length }, () =>
       Array.from({ length: GUIDE.yawBins.length }, () => 0)
@@ -732,6 +821,17 @@
     function getCaptureModeInfo(value = currentCaptureMode) {
       const mode = normalizeCaptureMode(value);
       return { mode, ...CAPTURE_MODE_INFO[mode] };
+    }
+
+    function preferredFacingModeForCaptureMode(mode) {
+      const normalized = normalizeCaptureMode(mode);
+      // 固定手机、转头：默认前置；环绕手机：默认后置。
+      return normalized === "head_rotation" ? "user" : "environment";
+    }
+
+    function syncPreferredFacingFromCaptureMode(mode = currentCaptureMode) {
+      preferredFacingMode = preferredFacingModeForCaptureMode(mode);
+      updateSwitchCamButtonText();
     }
 
     function syncCaptureModeFromInputs() {
@@ -772,6 +872,7 @@
         input.checked = input.value === normalized;
       }
       syncCaptureModeFromInputs();
+      syncPreferredFacingFromCaptureMode(currentCaptureMode);
       updateCaptureModeDescription();
     }
 
@@ -892,6 +993,197 @@
     function setStatus(text, cls = "") {
       jobStatusEl.textContent = text;
       jobStatusEl.className = `status ${cls}`;
+    }
+
+    function loadRecentJobsFromStorage() {
+      try {
+        const raw = localStorage.getItem(JOB_HISTORY_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .map((it) => ({
+            jobId: String(it?.jobId || "").trim(),
+            status: String(it?.status || "").trim(),
+            module: String(it?.module || "").trim(),
+            modeLabel: String(it?.modeLabel || "").trim(),
+            createdAt: String(it?.createdAt || "").trim(),
+            updatedAt: String(it?.updatedAt || "").trim(),
+            shotCount: Number.isFinite(Number(it?.shotCount)) ? Number(it.shotCount) : 0,
+          }))
+          .filter((it) => it.jobId)
+          .slice(0, JOB_HISTORY_LIMIT);
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveRecentJobsToStorage() {
+      try {
+        localStorage.setItem(JOB_HISTORY_KEY, JSON.stringify(recentJobs.slice(0, JOB_HISTORY_LIMIT)));
+      } catch (_) {
+        // Ignore storage errors (private mode / quota).
+      }
+    }
+
+    function statusClassOf(statusText) {
+      const s = String(statusText || "").toLowerCase();
+      if (s === "succeeded") return "ok";
+      if (s === "failed" || s.startsWith("http_")) return "error";
+      return "warn";
+    }
+
+    function formatHistoryTime(isoText) {
+      const t = Date.parse(String(isoText || ""));
+      if (!Number.isFinite(t)) return "-";
+      return new Date(t).toLocaleString("zh-CN", { hour12: false });
+    }
+
+    function upsertRecentJob(entry) {
+      const jobId = String(entry?.jobId || "").trim();
+      if (!jobId) return;
+      const nowIso = new Date().toISOString();
+      const idx = recentJobs.findIndex((it) => it.jobId === jobId);
+      const base = idx >= 0 ? recentJobs[idx] : { jobId, createdAt: entry?.createdAt || nowIso };
+      const merged = {
+        jobId,
+        status: String(entry?.status || base.status || "queued"),
+        module: String(entry?.module || base.module || ""),
+        modeLabel: String(entry?.modeLabel || base.modeLabel || ""),
+        createdAt: String(entry?.createdAt || base.createdAt || nowIso),
+        updatedAt: String(entry?.updatedAt || nowIso),
+        shotCount: Number.isFinite(Number(entry?.shotCount))
+          ? Number(entry.shotCount)
+          : (Number.isFinite(Number(base.shotCount)) ? Number(base.shotCount) : 0),
+      };
+      if (idx >= 0) {
+        recentJobs.splice(idx, 1);
+      }
+      recentJobs.unshift(merged);
+      recentJobs = recentJobs
+        .filter((it, i, arr) => !!it.jobId && arr.findIndex((x) => x.jobId === it.jobId) === i)
+        .slice(0, JOB_HISTORY_LIMIT);
+      saveRecentJobsToStorage();
+      renderRecentJobs();
+    }
+
+    function removeRecentJob(jobId) {
+      const id = String(jobId || "").trim();
+      if (!id) return;
+      recentJobs = recentJobs.filter((it) => it.jobId !== id);
+      saveRecentJobsToStorage();
+      renderRecentJobs();
+    }
+
+    function renderRecentJobs() {
+      if (!recentJobsEl) return;
+      recentJobsEl.innerHTML = "";
+      if (!recentJobs.length) {
+        const empty = document.createElement("div");
+        empty.className = "recent-empty";
+        empty.textContent = "暂无本机历史任务记录。上传后会自动保存，刷新或重新进入页面也可恢复查看。";
+        recentJobsEl.appendChild(empty);
+        return;
+      }
+
+      for (const item of recentJobs) {
+        const wrap = document.createElement("div");
+        wrap.className = "recent-job-item";
+
+        const top = document.createElement("div");
+        top.className = "recent-job-top";
+        const idEl = document.createElement("div");
+        idEl.className = "recent-job-id";
+        idEl.textContent = item.jobId;
+        const st = document.createElement("span");
+        st.className = `status ${statusClassOf(item.status)}`;
+        st.textContent = item.status || "-";
+        top.appendChild(idEl);
+        top.appendChild(st);
+
+        const meta = document.createElement("div");
+        meta.className = "recent-job-meta";
+        const modeText = item.modeLabel ? ` · ${item.modeLabel}` : "";
+        const shotText = item.shotCount > 0 ? ` · ${item.shotCount}张` : "";
+        meta.textContent = `更新时间 ${formatHistoryTime(item.updatedAt || item.createdAt)}${modeText}${shotText}`;
+
+        const actions = document.createElement("div");
+        actions.className = "recent-job-actions";
+        const openBtn = document.createElement("button");
+        openBtn.textContent = "查看";
+        openBtn.addEventListener("click", () => {
+          if (resumeJobInputEl) resumeJobInputEl.value = item.jobId;
+          resumeJobTracking(item.jobId);
+        });
+        const delBtn = document.createElement("button");
+        delBtn.className = "secondary";
+        delBtn.textContent = "删除记录";
+        delBtn.addEventListener("click", () => {
+          removeRecentJob(item.jobId);
+        });
+        actions.appendChild(openBtn);
+        actions.appendChild(delBtn);
+
+        wrap.appendChild(top);
+        wrap.appendChild(meta);
+        wrap.appendChild(actions);
+        recentJobsEl.appendChild(wrap);
+      }
+    }
+
+    function resumeJobTracking(jobId, { silent = false } = {}) {
+      const id = String(jobId || "").trim();
+      if (!id) return;
+      currentJobId = id;
+      resetTimeProgressForJob(currentJobId);
+      jobIdEl.textContent = currentJobId;
+      setStatus("loading", "warn");
+      jobModuleEl.textContent = "-";
+      jobPercentEl.textContent = "0.0%";
+      progressInner.style.width = "0%";
+      jobEtaEl.textContent = "计算中...";
+      artifactsEl.innerHTML = "";
+      resetResultViewer();
+      if (!silent) {
+        uploadStatus.textContent = `已恢复任务 ${currentJobId}，正在读取状态...`;
+      }
+      upsertRecentJob({ jobId: currentJobId, status: "loading" });
+      startPolling();
+    }
+
+    async function refreshRecentJobsStatuses() {
+      if (!recentJobs.length) return;
+      const jobsCopy = recentJobs.slice(0, JOB_HISTORY_LIMIT);
+      const results = await Promise.all(
+        jobsCopy.map(async (item) => {
+          try {
+            const res = await fetch(api(`/api/jobs/${item.jobId}`));
+            if (!res.ok) {
+              return {
+                ...item,
+                status: `http_${res.status}`,
+                updatedAt: item.updatedAt || new Date().toISOString(),
+              };
+            }
+            const job = await res.json();
+            const p = job.progress || {};
+            return {
+              ...item,
+              status: String(job.status || item.status || "-"),
+              module: String(p.module || ""),
+              createdAt: String(job.created_at || item.createdAt || ""),
+              updatedAt: String(job.updated_at || new Date().toISOString()),
+            };
+          } catch (_) {
+            return item;
+          }
+        })
+      );
+      recentJobs = results
+        .filter((it) => it && it.jobId)
+        .slice(0, JOB_HISTORY_LIMIT);
+      saveRecentJobsToStorage();
+      renderRecentJobs();
     }
 
     function clamp(v, lo, hi) {
@@ -1080,11 +1372,42 @@
       return pitchCounts;
     }
 
+    function getShotResolutionStats() {
+      let total = 0;
+      let lowResCount = 0;
+      let minLongSide = Number.POSITIVE_INFINITY;
+      let maxLongSide = 0;
+      for (const shots of capturedShots.values()) {
+        for (const shot of shots) {
+          total += 1;
+          const w = Number(shot.width || 0);
+          const h = Number(shot.height || 0);
+          const longSide = Number(shot.longSide || Math.max(w, h, 0));
+          if (longSide > 0) {
+            minLongSide = Math.min(minLongSide, longSide);
+            maxLongSide = Math.max(maxLongSide, longSide);
+          }
+          if (UPLOAD_GATE.minLongSide > 0) {
+            if (longSide <= 0 || longSide < UPLOAD_GATE.minLongSide) {
+              lowResCount += 1;
+            }
+          }
+        }
+      }
+      return {
+        total,
+        lowResCount,
+        minLongSide: Number.isFinite(minLongSide) ? Math.round(minLongSide) : 0,
+        maxLongSide: Math.round(maxLongSide || 0),
+      };
+    }
+
     function getUploadGateState() {
       const covered = countCoveredCells();
       const coverageRatio = totalCells > 0 ? (covered / totalCells) : 0;
       const pitchCounts = getPitchCaptureCounts();
       const totalShots = getTotalShotCount();
+      const resStats = getShotResolutionStats();
       const reasons = [];
 
       if (totalShots < UPLOAD_GATE.minShots) {
@@ -1098,6 +1421,12 @@
           reasons.push(`${sectorLabel(r)}至少 ${UPLOAD_GATE.minPerPitchShots} 张，当前 ${pitchCounts[r]} 张`);
         }
       }
+      if (UPLOAD_GATE.minLongSide > 0 && resStats.lowResCount > 0) {
+        const minText = resStats.minLongSide > 0 ? `${resStats.minLongSide}` : "未知";
+        reasons.push(
+          `分辨率门槛：长边至少 ${UPLOAD_GATE.minLongSide}px，当前有 ${resStats.lowResCount} 张未达标（最低 ${minText}px）`
+        );
+      }
 
       return {
         ok: reasons.length === 0,
@@ -1106,6 +1435,9 @@
         coverageRatio,
         totalShots,
         pitchCounts,
+        minLongSide: resStats.minLongSide,
+        maxLongSide: resStats.maxLongSide,
+        lowResCount: resStats.lowResCount,
       };
     }
 
@@ -1309,8 +1641,9 @@
         }
       }
       const gate = getUploadGateState();
+      const minSideText = gate.minLongSide > 0 ? `${gate.minLongSide}px` : "-";
       captureSummaryEl.textContent =
-        `${gate.totalShots} 张（覆盖 ${(gate.coverageRatio * 100).toFixed(0)}%，每格最多 ${CAPTURE_POLICY.topKPerCell} 张）`;
+        `${gate.totalShots} 张（覆盖 ${(gate.coverageRatio * 100).toFixed(0)}%，每格最多 ${CAPTURE_POLICY.topKPerCell} 张，最低长边 ${minSideText}）`;
       uploadCaptureBtn.disabled = !gate.ok;
       uploadCaptureBtn.title = gate.ok ? "已满足高质量上传门槛" : `未达上传门槛：${gate.reasons.join("；")}`;
       clearCaptureBtn.disabled = gate.totalShots === 0;
@@ -1788,12 +2121,18 @@
       resultViewState.pitch += (resultViewState.targetPitch - resultViewState.pitch) * 0.22;
       resultViewState.distance += (resultViewState.targetDistance - resultViewState.distance) * 0.18;
 
-      const cp = Math.cos(resultViewState.pitch);
-      const sp = Math.sin(resultViewState.pitch);
-      const sy = Math.sin(resultViewState.yaw);
-      const cy = Math.cos(resultViewState.yaw);
-      const d = resultViewState.distance;
-      resultCamera.position.set(d * sy * cp, d * sp, d * cy * cp);
+      if (resultRoot) {
+        const euler = new window.THREE.Euler(
+          resultViewState.pitch,
+          resultViewState.yaw + RESULT_FRONT_YAW_OFFSET,
+          0,
+          "YXZ"
+        );
+        resultRoot.quaternion.setFromEuler(euler);
+      }
+
+      resultCamera.position.set(0, 0, resultViewState.distance);
+      resultCamera.up.set(0, 1, 0);
       resultCamera.lookAt(0, 0, 0);
       resultRenderer.render(resultScene, resultCamera);
     }
@@ -1827,33 +2166,43 @@
       resultScene.add(hemi, key, fill);
 
       resultRoot = new THREE_NS.Group();
+      resultRoot.rotation.order = "YXZ";
       resultScene.add(resultRoot);
       syncResultViewerSize();
 
       resultViewerCanvas.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
         resultViewState.dragging = true;
         resultViewState.lastX = ev.clientX;
         resultViewState.lastY = ev.clientY;
+        resultViewState.pointerId = ev.pointerId;
         resultViewerCanvas.classList.add("dragging");
         resultViewerCanvas.setPointerCapture(ev.pointerId);
       });
       resultViewerCanvas.addEventListener("pointermove", (ev) => {
-        if (!resultViewState.dragging) return;
+        if (!resultViewState.dragging || resultViewState.pointerId !== ev.pointerId) return;
+        ev.preventDefault();
         const dx = ev.clientX - resultViewState.lastX;
         const dy = ev.clientY - resultViewState.lastY;
         resultViewState.lastX = ev.clientX;
         resultViewState.lastY = ev.clientY;
-        resultViewState.targetYaw += dx * 0.012;
-        resultViewState.targetPitch = clamp(resultViewState.targetPitch + dy * 0.008, -1.05, 1.05);
+        const baseW = Math.max(240, resultViewerCanvas.clientWidth || 360);
+        const baseH = Math.max(220, resultViewerCanvas.clientHeight || 280);
+        resultViewState.targetYaw += (dx / baseW) * Math.PI * 1.8;
+        resultViewState.targetPitch = clamp(
+          resultViewState.targetPitch + (dy / baseH) * Math.PI * 0.8,
+          -RESULT_PITCH_LIMIT,
+          RESULT_PITCH_LIMIT
+        );
       });
-      resultViewerCanvas.addEventListener("pointerup", () => {
+      const releaseResultDrag = () => {
         resultViewState.dragging = false;
+        resultViewState.pointerId = null;
         resultViewerCanvas.classList.remove("dragging");
-      });
-      resultViewerCanvas.addEventListener("pointercancel", () => {
-        resultViewState.dragging = false;
-        resultViewerCanvas.classList.remove("dragging");
-      });
+      };
+      resultViewerCanvas.addEventListener("pointerup", releaseResultDrag);
+      resultViewerCanvas.addEventListener("pointercancel", releaseResultDrag);
+      resultViewerCanvas.addEventListener("lostpointercapture", releaseResultDrag);
       resultViewerCanvas.addEventListener("wheel", (ev) => {
         ev.preventDefault();
         resultViewState.targetDistance = clamp(
@@ -1862,6 +2211,11 @@
           6.5
         );
       }, { passive: false });
+      resultViewerCanvas.addEventListener("dblclick", () => {
+        resultViewState.targetYaw = 0;
+        resultViewState.targetPitch = 0;
+        resultViewState.targetDistance = 2.9;
+      });
 
       if (!resultAnimHandle) {
         animateResultViewer();
@@ -1967,7 +2321,15 @@
 
       const geometry = new THREE_NS.BufferGeometry();
       geometry.setAttribute("position", new THREE_NS.Float32BufferAttribute(positions, 3));
-      geometry.setIndex(indices);
+      let maxIndex = 0;
+      for (let i = 0; i < indices.length; i += 1) {
+        if (indices[i] > maxIndex) maxIndex = indices[i];
+      }
+      if (maxIndex > 65535) {
+        geometry.setIndex(new THREE_NS.Uint32BufferAttribute(indices, 1));
+      } else {
+        geometry.setIndex(new THREE_NS.Uint16BufferAttribute(indices, 1));
+      }
       if (hasAnyUV) {
         geometry.setAttribute("uv", new THREE_NS.Float32BufferAttribute(uvs, 2));
       }
@@ -1980,6 +2342,134 @@
       return {
         geometry,
         hasUV: hasAnyUV,
+      };
+    }
+
+    function objectHasUV(root) {
+      let hasUV = false;
+      if (!root || !root.traverse) return false;
+      root.traverse((child) => {
+        if (hasUV) return;
+        if (!child || !child.isMesh || !child.geometry) return;
+        const attr = child.geometry.attributes;
+        hasUV = !!(attr && attr.uv && attr.uv.count > 0);
+      });
+      return hasUV;
+    }
+
+    function objectHasMaterialMap(root) {
+      let hasMap = false;
+      if (!root || !root.traverse) return false;
+      root.traverse((child) => {
+        if (hasMap || !child || !child.isMesh) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (mat && mat.map) {
+            hasMap = true;
+            break;
+          }
+        }
+      });
+      return hasMap;
+    }
+
+    function normalizeObjectMaterialsForViewer(root, THREE_NS) {
+      if (!root || !root.traverse) return;
+      root.traverse((child) => {
+        if (!child || !child.isMesh) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        for (const mat of mats) {
+          if (!mat) continue;
+          mat.side = THREE_NS.DoubleSide;
+          if (mat.map) {
+            if ("colorSpace" in mat.map && THREE_NS.SRGBColorSpace) {
+              mat.map.colorSpace = THREE_NS.SRGBColorSpace;
+            }
+            mat.map.needsUpdate = true;
+          }
+          mat.needsUpdate = true;
+        }
+      });
+    }
+
+    function loadThreeAsset(loader, url) {
+      return new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, (err) => reject(err || new Error(`加载失败: ${url}`)));
+      });
+    }
+
+    function basePathFromUrl(url) {
+      const src = String(url || "");
+      const idx = src.lastIndexOf("/");
+      if (idx < 0) return "";
+      return src.slice(0, idx + 1);
+    }
+
+    async function tryLoadObjWithMtlForViewer(THREE_NS, objUrl, mtlUrl) {
+      if (!mtlUrl || !THREE_NS.OBJLoader || !THREE_NS.MTLLoader) return null;
+      const mtlLoader = new THREE_NS.MTLLoader();
+      const basePath = basePathFromUrl(mtlUrl);
+      if (mtlLoader.setResourcePath) {
+        mtlLoader.setResourcePath(basePath);
+      }
+      const materials = await loadThreeAsset(mtlLoader, mtlUrl);
+      if (materials && materials.preload) {
+        materials.preload();
+      }
+      const objLoader = new THREE_NS.OBJLoader();
+      if (materials) {
+        objLoader.setMaterials(materials);
+      }
+      const root = await loadThreeAsset(objLoader, objUrl);
+      if (!root || !root.children || root.children.length === 0) {
+        throw new Error("MTL/OBJ 解析结果为空");
+      }
+      normalizeObjectMaterialsForViewer(root, THREE_NS);
+      return {
+        object: root,
+        hasUV: objectHasUV(root),
+        hasMaterialMap: objectHasMaterialMap(root),
+      };
+    }
+
+    function applyResultMaterialToObject(root, material) {
+      if (!root || !root.traverse) return;
+      root.traverse((child) => {
+        if (!child || !child.isMesh || !child.geometry) return;
+        const attr = child.geometry.attributes;
+        if (!attr || !attr.normal || attr.normal.count === 0) {
+          child.geometry.computeVertexNormals();
+        }
+        const oldMat = child.material;
+        child.material = material;
+        if (oldMat && oldMat !== material && oldMat.dispose) {
+          oldMat.dispose();
+        }
+      });
+    }
+
+    function buildResultObjectFromObjText(THREE_NS, objText) {
+      if (THREE_NS.OBJLoader) {
+        try {
+          const loader = new THREE_NS.OBJLoader();
+          const root = loader.parse(objText);
+          if (root && root.children && root.children.length > 0) {
+            return {
+              object: root,
+              hasUV: objectHasUV(root),
+            };
+          }
+        } catch (_) {
+          // Fallback to the lightweight parser below.
+        }
+      }
+      const parsed = parseObjGeometryForViewer(THREE_NS, objText);
+      const root = new THREE_NS.Group();
+      root.add(new THREE_NS.Mesh(parsed.geometry));
+      return {
+        object: root,
+        hasUV: parsed.hasUV,
+        hasMaterialMap: false,
       };
     }
 
@@ -2003,7 +2493,7 @@
       resultQuickDownloadsEl.appendChild(btn);
     }
 
-    async function loadResultViewerMesh(objUrl, texUrl) {
+    async function loadResultViewerMesh(objUrl, texUrl, mtlUrl = "") {
       initResultViewer();
       if (!resultRenderer || !resultRoot || !window.THREE) {
         return;
@@ -2012,15 +2502,26 @@
       setResultViewerHint("正在加载重建 Mesh...");
       clearResultMesh();
 
-      const objRes = await fetch(objUrl);
-      if (!objRes.ok) {
-        throw new Error(`OBJ 下载失败: HTTP ${objRes.status}`);
+      let parsed = null;
+      let mtlLoadErr = null;
+      if (mtlUrl) {
+        try {
+          parsed = await tryLoadObjWithMtlForViewer(THREE_NS, objUrl, mtlUrl);
+        } catch (err) {
+          mtlLoadErr = err;
+        }
       }
-      const objText = await objRes.text();
-      const parsed = parseObjGeometryForViewer(THREE_NS, objText);
+      if (!parsed) {
+        const objRes = await fetch(objUrl);
+        if (!objRes.ok) {
+          throw new Error(`OBJ 下载失败: HTTP ${objRes.status}`);
+        }
+        const objText = await objRes.text();
+        parsed = buildResultObjectFromObjText(THREE_NS, objText);
+      }
 
       let texture = null;
-      if (texUrl && parsed.hasUV) {
+      if (texUrl && !parsed.hasMaterialMap) {
         texture = await new Promise((resolve, reject) => {
           new THREE_NS.TextureLoader().load(
             texUrl,
@@ -2029,26 +2530,32 @@
             (err) => reject(err || new Error("纹理加载失败"))
           );
         });
-        texture.flipY = false;
         if ("colorSpace" in texture && THREE_NS.SRGBColorSpace) {
           texture.colorSpace = THREE_NS.SRGBColorSpace;
         }
         texture.needsUpdate = true;
       }
 
-      const material = new THREE_NS.MeshStandardMaterial({
-        color: 0xffffff,
-        map: texture,
-        roughness: 0.82,
-        metalness: 0.03,
-        side: THREE_NS.DoubleSide,
-      });
-      const mesh = new THREE_NS.Mesh(parsed.geometry, material);
-      const box = parsed.geometry.boundingBox;
-      const center = new THREE_NS.Vector3();
-      const size = new THREE_NS.Vector3();
-      box.getCenter(center);
-      box.getSize(size);
+      const mesh = parsed.object;
+      if (texture || !parsed.hasMaterialMap) {
+        const material = new THREE_NS.MeshStandardMaterial({
+          color: 0xffffff,
+          map: texture,
+          roughness: 0.82,
+          metalness: 0.03,
+          side: THREE_NS.DoubleSide,
+        });
+        applyResultMaterialToObject(mesh, material);
+      } else {
+        normalizeObjectMaterialsForViewer(mesh, THREE_NS);
+      }
+
+      const box = new THREE_NS.Box3().setFromObject(mesh);
+      if (box.isEmpty()) {
+        throw new Error("OBJ 几何为空，无法预览");
+      }
+      const center = box.getCenter(new THREE_NS.Vector3());
+      const size = box.getSize(new THREE_NS.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
       const fitScale = 1.9 / maxDim;
       mesh.position.set(-center.x * fitScale, -center.y * fitScale, -center.z * fitScale);
@@ -2063,7 +2570,9 @@
       resultViewState.distance = 2.9;
       resultViewState.targetDistance = 2.9;
 
-      const texNote = texture ? "已加载纹理" : "未检测到纹理图";
+      const texNote = parsed.hasMaterialMap
+        ? (mtlLoadErr ? "已通过 MTL 回退贴图" : "已通过 MTL 贴图")
+        : (texture ? "已加载纹理" : "未检测到纹理图");
       setResultViewerHint(`拖拽可旋转，滚轮可缩放（${texNote}）。`);
     }
 
@@ -2465,6 +2974,41 @@
       });
     }
 
+    async function getBlobDimensions(blob) {
+      if (!blob || !(blob.size > 0)) return null;
+      if (typeof createImageBitmap === "function") {
+        try {
+          const bitmap = await createImageBitmap(blob);
+          const out = { width: Number(bitmap.width || 0), height: Number(bitmap.height || 0) };
+          if (bitmap.close) bitmap.close();
+          if (out.width > 0 && out.height > 0) {
+            return out;
+          }
+        } catch (_) {
+          // Fallback to HTMLImageElement decode path.
+        }
+      }
+      return await new Promise((resolve) => {
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          const width = Number(img.naturalWidth || img.width || 0);
+          const height = Number(img.naturalHeight || img.height || 0);
+          URL.revokeObjectURL(url);
+          if (width > 0 && height > 0) {
+            resolve({ width, height });
+          } else {
+            resolve(null);
+          }
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        };
+        img.src = url;
+      });
+    }
+
     async function captureShotForMetrics(metrics, targetCell = null) {
       if (!metrics || !metrics.passFrame) {
         return null;
@@ -2491,6 +3035,10 @@
       if (!blob) {
         throw new Error("图像编码失败");
       }
+      const blobDims = await getBlobDimensions(blob);
+      const shotWidth = Math.round(Number((blobDims && blobDims.width) || preview.videoWidth || 0));
+      const shotHeight = Math.round(Number((blobDims && blobDims.height) || preview.videoHeight || 0));
+      const shotLongSide = Math.max(shotWidth, shotHeight, 0);
 
       const yawTag = GUIDE.yawBins[c];
       const pitchTag = GUIDE.pitchBins[r];
@@ -2508,6 +3056,9 @@
         poseYaw: metrics.yaw,
         posePitch: metrics.pitch,
         poseRoll: metrics.roll,
+        width: shotWidth,
+        height: shotHeight,
+        longSide: shotLongSide,
         ts: Date.now(),
       };
       upsertCandidateInCell(key, shot, captureDecision.replaceIndex);
@@ -2573,6 +3124,70 @@
       return settings.facingMode === "user" ? "user" : (settings.facingMode === "environment" ? "environment" : fallbackMode);
     }
 
+    function getTrackResolution(mediaStream) {
+      const track = mediaStream && mediaStream.getVideoTracks ? mediaStream.getVideoTracks()[0] : null;
+      if (!track || !track.getSettings) return null;
+      const settings = track.getSettings() || {};
+      const width = Number(settings.width || 0);
+      const height = Number(settings.height || 0);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return null;
+      }
+      return { width: Math.round(width), height: Math.round(height) };
+    }
+
+    function getTrackResolutionCaps(mediaStream) {
+      const track = mediaStream && mediaStream.getVideoTracks ? mediaStream.getVideoTracks()[0] : null;
+      if (!track || !track.getCapabilities) return null;
+      let caps = null;
+      try {
+        caps = track.getCapabilities();
+      } catch (_) {
+        return null;
+      }
+      if (!caps || !caps.width || !caps.height) return null;
+      const maxWidth = Number(caps.width.max || 0);
+      const maxHeight = Number(caps.height.max || 0);
+      if (!Number.isFinite(maxWidth) || !Number.isFinite(maxHeight) || maxWidth <= 0 || maxHeight <= 0) {
+        return null;
+      }
+      return {
+        maxWidth: Math.round(maxWidth),
+        maxHeight: Math.round(maxHeight),
+      };
+    }
+
+    async function tryBoostStreamToDeviceMax(mediaStream) {
+      const track = mediaStream && mediaStream.getVideoTracks ? mediaStream.getVideoTracks()[0] : null;
+      if (!track || !track.applyConstraints || !track.getCapabilities) {
+        return { attempted: false, applied: false, reason: "no_track_constraints_api" };
+      }
+      const caps = getTrackResolutionCaps(mediaStream);
+      if (!caps) {
+        return { attempted: false, applied: false, reason: "no_caps" };
+      }
+      const before = getTrackResolution(mediaStream);
+      try {
+        await track.applyConstraints({
+          width: { ideal: caps.maxWidth },
+          height: { ideal: caps.maxHeight },
+        });
+      } catch (e) {
+        return {
+          attempted: true,
+          applied: false,
+          reason: "apply_failed",
+          error: e,
+          caps,
+          before,
+          after: getTrackResolution(mediaStream),
+        };
+      }
+      const after = getTrackResolution(mediaStream);
+      const applied = !!after && (after.width !== (before && before.width) || after.height !== (before && before.height));
+      return { attempted: true, applied, reason: applied ? "applied" : "unchanged", caps, before, after };
+    }
+
     function updateSwitchCamButtonText() {
       const baseMode = currentFacingMode || preferredFacingMode;
       const nextMode = baseMode === "environment" ? "user" : "environment";
@@ -2580,27 +3195,24 @@
     }
 
     async function requestCameraStream(facingMode) {
-      const baseVideoConstraints = {};
-      try {
-        return await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            ...baseVideoConstraints,
-            facingMode: { exact: facingMode },
-          },
-        });
-      } catch (e) {
-        if (e && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) {
+      const facingPrefs = [{ exact: facingMode }, { ideal: facingMode }];
+      let lastErr = null;
+      for (const facingPref of facingPrefs) {
+        try {
           return await navigator.mediaDevices.getUserMedia({
             audio: false,
             video: {
-              ...baseVideoConstraints,
-              facingMode: { ideal: facingMode },
+              facingMode: facingPref,
             },
           });
+        } catch (e) {
+          lastErr = e;
+          if (e && e.name === "NotAllowedError") {
+            throw e;
+          }
         }
-        throw e;
       }
+      throw lastErr || new Error("无法打开摄像头");
     }
 
     function closeCameraStream({ updateHint = true } = {}) {
@@ -2639,6 +3251,7 @@
       currentFacingMode = inferFacingMode(stream, preferredFacingMode);
       preferredFacingMode = currentFacingMode;
       updateSwitchCamButtonText();
+      const boostResult = await tryBoostStreamToDeviceMax(stream);
       applyPreviewOrientation();
       preview.srcObject = stream;
       preview.onloadedmetadata = () => {
@@ -2646,7 +3259,31 @@
         clearOverlay();
         drawVirtualMesh();
       };
-      setCameraHint("保持人脸在中间，系统会提示远近并自动拍摄", "warn");
+      const trackRes = getTrackResolution(stream);
+      const trackCaps = getTrackResolutionCaps(stream);
+      if (trackRes && trackCaps) {
+        const maxSide = Math.max(trackCaps.maxWidth, trackCaps.maxHeight);
+        const curSide = Math.max(trackRes.width, trackRes.height);
+        if (curSide < maxSide) {
+          setCameraHint(
+            `当前相机输出约 ${trackRes.width}x${trackRes.height}（设备上限约 ${trackCaps.maxWidth}x${trackCaps.maxHeight}）`,
+            "warn"
+          );
+        } else {
+          setCameraHint("保持人脸在中间，系统会提示远近并自动拍摄", "warn");
+        }
+      } else if (trackRes && Math.max(trackRes.width, trackRes.height) < 1280) {
+        setCameraHint(
+          `当前相机输出约 ${trackRes.width}x${trackRes.height}（低于1280），可尝试切换摄像头`,
+          "warn"
+        );
+      } else {
+        setCameraHint("保持人脸在中间，系统会提示远近并自动拍摄", "warn");
+      }
+
+      if (boostResult && boostResult.attempted && !boostResult.applied && boostResult.reason === "apply_failed") {
+        console.warn("camera max-resolution boost failed:", boostResult.error || "");
+      }
       switchCamBtn.disabled = false;
 
       if (!keepProgress) {
@@ -2682,6 +3319,9 @@
             pitch: shot.pitch,
             score: Number(shot.score || 0),
             face_ratio: Number(shot.faceRatio || 0),
+            width: Number(shot.width || 0),
+            height: Number(shot.height || 0),
+            long_side: Number(shot.longSide || 0),
             filename: shot.filename,
           });
         }
@@ -2709,6 +3349,15 @@
       currentJobId = data.job_id;
       resetTimeProgressForJob(currentJobId);
       jobIdEl.textContent = currentJobId;
+      if (resumeJobInputEl) {
+        resumeJobInputEl.value = currentJobId;
+      }
+      upsertRecentJob({
+        jobId: currentJobId,
+        status: "queued",
+        modeLabel: modeInfo.label,
+        shotCount: totalShots,
+      });
       setStatus("queued", "warn");
       jobModuleEl.textContent = "-";
       jobPercentEl.textContent = "0.0%";
@@ -2728,6 +3377,13 @@
         const job = await infoRes.json();
         const st = job.status || "-";
         const p = job.progress || {};
+        upsertRecentJob({
+          jobId: currentJobId,
+          status: st,
+          module: p.module || "",
+          createdAt: job.created_at || "",
+          updatedAt: job.updated_at || "",
+        });
 
         jobModuleEl.textContent = p.module || "-";
         const tProgress = computeTimeProgress(job, st, p);
@@ -2746,6 +3402,10 @@
         if (st === "failed") {
           stopPolling();
         }
+      } else {
+        setStatus(`http_${infoRes.status}`, "error");
+        jobEtaEl.textContent = "-";
+        stopPolling();
       }
     }
 
@@ -2781,7 +3441,8 @@
       try {
         await loadResultViewerMesh(
           api(objArtifact.download_url),
-          texArtifact ? api(texArtifact.download_url) : ""
+          texArtifact ? api(texArtifact.download_url) : "",
+          mtlArtifact ? api(mtlArtifact.download_url) : ""
         );
       } catch (e) {
         clearResultMesh();
@@ -2815,10 +3476,13 @@
       }
       try {
         syncCaptureModeFromInputs();
+        syncPreferredFacingFromCaptureMode(currentCaptureMode);
         updateCaptureModeDescription();
         const modeInfo = getCaptureModeInfo();
         await openCamera();
-        uploadStatus.textContent = `摄像头已开启（${cameraFacingText(currentFacingMode)}），模式：${modeInfo.label}，连续采样中（每视角自动保留最清晰Top-K）`;
+        const trackRes = getTrackResolution(stream);
+        const resText = trackRes ? `，分辨率约 ${trackRes.width}x${trackRes.height}` : "";
+        uploadStatus.textContent = `摄像头已开启（${cameraFacingText(currentFacingMode)}${resText}），模式：${modeInfo.label}，连续采样中（每视角自动保留最清晰Top-K）`;
       } catch (e) {
         uploadStatus.textContent = `打开摄像头失败: ${e.message}`;
         setGuideMessage(`实时引导初始化失败: ${e.message}`, "error");
@@ -2831,7 +3495,9 @@
         preferredFacingMode = mode === "environment" ? "user" : "environment";
         await openCamera({ keepProgress: true });
         const modeInfo = getCaptureModeInfo();
-        uploadStatus.textContent = `已切换到${cameraFacingText(currentFacingMode)}摄像头，模式：${modeInfo.label}，连续采样中（每视角自动保留最清晰Top-K）`;
+        const trackRes = getTrackResolution(stream);
+        const resText = trackRes ? `，分辨率约 ${trackRes.width}x${trackRes.height}` : "";
+        uploadStatus.textContent = `已切换到${cameraFacingText(currentFacingMode)}摄像头${resText}，模式：${modeInfo.label}，连续采样中（每视角自动保留最清晰Top-K）`;
       } catch (e) {
         uploadStatus.textContent = `切换摄像头失败: ${e.message}`;
       }
@@ -2840,6 +3506,7 @@
     for (const input of captureModeInputs) {
       input.addEventListener("change", () => {
         syncCaptureModeFromInputs();
+        syncPreferredFacingFromCaptureMode(currentCaptureMode);
         updateCaptureModeDescription();
         const info = getCaptureModeInfo();
         if (!analysisEnabled) {
@@ -2862,6 +3529,30 @@
       });
     });
 
+    if (resumeJobBtn) {
+      resumeJobBtn.addEventListener("click", () => {
+        const id = String(resumeJobInputEl?.value || "").trim();
+        if (!id) {
+          uploadStatus.textContent = "请输入要恢复的 Job ID";
+          return;
+        }
+        resumeJobTracking(id);
+      });
+    }
+    if (resumeJobInputEl) {
+      resumeJobInputEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          const id = String(resumeJobInputEl.value || "").trim();
+          if (!id) {
+            uploadStatus.textContent = "请输入要恢复的 Job ID";
+            return;
+          }
+          resumeJobTracking(id);
+        }
+      });
+    }
+
     window.addEventListener("resize", () => {
       applyFanGridLayout();
       syncOverlaySize();
@@ -2877,6 +3568,12 @@
     initGuideGrid();
     setStartupCaptureLocked(true);
     applyCaptureModeToInputs(DEFAULT_CAPTURE_MODE);
+    recentJobs = loadRecentJobsFromStorage();
+    renderRecentJobs();
+    refreshRecentJobsStatuses().catch(() => {});
+    if (recentJobs.length > 0 && resumeJobInputEl) {
+      resumeJobInputEl.value = recentJobs[0].jobId;
+    }
     resetCoverage();
     resetResultViewer();
     syncResultViewerSize();
@@ -2896,6 +3593,7 @@
         if (!startupModeSelected) return;
         startupModeConfirmed = true;
         applyCaptureModeToInputs(startupModeSelected);
+        syncPreferredFacingFromCaptureMode(startupModeSelected);
         setStartupCaptureLocked(false);
         if (startupModeModalEl) {
           startupModeModalEl.classList.add("hidden");
