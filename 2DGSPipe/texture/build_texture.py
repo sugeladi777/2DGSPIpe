@@ -60,9 +60,9 @@ from mesh_renderer import MeshRenderer
 
 net_cfg = {
     "log2_hashmap_size": 16,
-    "finest_level": 2048,
-    "uv_reso_w": 1536,
-    "uv_reso_h": 1536,
+    "finest_level": 1024,
+    "uv_reso_w": 1024,
+    "uv_reso_h": 1024,
     "batch_size": 2097152,
     "residual_scale": 0.25,
 }

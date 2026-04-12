@@ -333,6 +333,85 @@
       padding: 6px 10px;
       font-size: 13px;
     }
+    .result-actions button {
+      display: inline-block;
+      text-decoration: none;
+      color: #fff;
+      background: linear-gradient(180deg, #1e7aff, #0a6cff);
+      border: 1px solid #0a6cff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .startup-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 18, 32, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .startup-modal.hidden {
+      display: none;
+    }
+    .startup-modal-card {
+      width: min(560px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #d7dfed;
+      box-shadow: 0 18px 40px rgba(21, 35, 63, 0.22);
+      padding: 18px;
+    }
+    .startup-modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a2f52;
+      margin-bottom: 6px;
+    }
+    .startup-modal-subtitle {
+      font-size: 13px;
+      color: #526987;
+      margin-bottom: 14px;
+    }
+    .startup-mode-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .startup-mode-item {
+      border: 1px solid #cfdaee;
+      background: #f7faff;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .startup-mode-item.active {
+      border-color: #2f67ff;
+      background: #ebf2ff;
+    }
+    .startup-mode-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1c3358;
+      margin-bottom: 4px;
+    }
+    .startup-mode-desc {
+      font-size: 12px;
+      color: #516884;
+      line-height: 1.45;
+    }
+    .startup-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .startup-modal-actions button {
+      min-width: 120px;
+    }
 
     @media (max-width: 980px) {
       .stage-wrap {
@@ -439,6 +518,25 @@
     </div>
 
   </div>
+  <div id="startupModeModal" class="startup-modal">
+    <div class="startup-modal-card">
+      <div class="startup-modal-title">请选择拍摄模式</div>
+      <div class="startup-modal-subtitle">进入拍摄前先确认模式，后端会按模式选择对应重建策略。</div>
+      <div class="startup-mode-list" id="startupModeList">
+        <button type="button" class="startup-mode-item" data-mode="head_rotation">
+          <div class="startup-mode-name">固定手机，转动头部</div>
+          <div class="startup-mode-desc">手机尽量不动，人脸缓慢转动覆盖左右与上下角度；后端 COLMAP 使用 face_mask。</div>
+        </button>
+        <button type="button" class="startup-mode-item" data-mode="camera_orbit">
+          <div class="startup-mode-name">环绕人脸移动手机</div>
+          <div class="startup-mode-desc">人脸尽量朝前，手机围绕人脸移动采集多视角；后端 COLMAP 使用 wholebody_mask。</div>
+        </button>
+      </div>
+      <div class="startup-modal-actions">
+        <button id="startupModeConfirmBtn" type="button" disabled>确认并开始</button>
+      </div>
+    </div>
+  </div>
 
   <script src="assets/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
@@ -462,7 +560,7 @@
     const CANONICAL_FACE_MESH_URL = "assets/canonical_face_model.obj";
     const GUIDE = {
       faceRatioMin: 0.28,
-      faceRatioMax: 0.46,
+      faceRatioMax: 0.60,
       centerOffsetMax: 0.15,
       rollAbsMax: 20,
       yawAbsMax: 90,
@@ -518,6 +616,9 @@
     const captureModeDescEl = document.getElementById("captureModeDesc");
     const captureModeInputs = Array.from(document.querySelectorAll('input[name="captureMode"]'));
     const uploadStatus = document.getElementById("uploadStatus");
+    const startupModeModalEl = document.getElementById("startupModeModal");
+    const startupModeListEl = document.getElementById("startupModeList");
+    const startupModeConfirmBtn = document.getElementById("startupModeConfirmBtn");
 
     const jobIdEl = document.getElementById("jobId");
     const jobStatusEl = document.getElementById("jobStatus");
@@ -557,6 +658,8 @@
     let preferredFacingMode = "environment";
     let currentFacingMode = null;
     let currentCaptureMode = DEFAULT_CAPTURE_MODE;
+    let startupModeSelected = "";
+    let startupModeConfirmed = false;
     let currentJobId = null;
     let pollTimer = null;
     const BASE_MODULE_SECONDS = Object.freeze({
@@ -640,6 +743,36 @@
       if (!captureModeDescEl) return;
       const info = getCaptureModeInfo();
       captureModeDescEl.textContent = `${info.label}：${info.desc}`;
+    }
+
+    function setStartupCaptureLocked(locked) {
+      if (locked) {
+        openCamBtn.disabled = true;
+        switchCamBtn.disabled = true;
+      } else {
+        openCamBtn.disabled = false;
+      }
+    }
+
+    function setStartupSelectedMode(mode) {
+      startupModeSelected = normalizeCaptureMode(mode);
+      if (!startupModeListEl) return;
+      const items = startupModeListEl.querySelectorAll(".startup-mode-item");
+      for (const item of items) {
+        item.classList.toggle("active", item.dataset.mode === startupModeSelected);
+      }
+      if (startupModeConfirmBtn) {
+        startupModeConfirmBtn.disabled = false;
+      }
+    }
+
+    function applyCaptureModeToInputs(mode) {
+      const normalized = normalizeCaptureMode(mode);
+      for (const input of captureModeInputs) {
+        input.checked = input.value === normalized;
+      }
+      syncCaptureModeFromInputs();
+      updateCaptureModeDescription();
     }
 
     function parseIsoMs(value) {
@@ -980,10 +1113,21 @@
       if (!metrics) return 0;
       const sharpness = Number(metrics.sharpness || 0);
       const centerPenalty = (Math.abs(metrics.centerOffsetX || 0) + Math.abs(metrics.centerOffsetY || 0)) * 40;
-      const ratioMid = (GUIDE.faceRatioMin + GUIDE.faceRatioMax) * 0.5;
-      const ratioPenalty = Math.abs((metrics.faceRatio || 0) - ratioMid) * 200;
+      const faceRatio = Number(metrics.faceRatio || 0);
+      const ratioSpan = Math.max(1e-6, GUIDE.faceRatioMax - GUIDE.faceRatioMin);
+      const ratioNorm = clamp((faceRatio - GUIDE.faceRatioMin) / ratioSpan, 0, 1);
+      // Explicitly reward larger valid face coverage (near the upper part of target range).
+      const faceRatioBonus = ratioNorm * 8.0;
+      const preferredNorm = 0.82;
+      const preferredPenalty = Math.abs(ratioNorm - preferredNorm) * 3.5;
+      let outOfRangePenalty = 0;
+      if (faceRatio < GUIDE.faceRatioMin) {
+        outOfRangePenalty = (GUIDE.faceRatioMin - faceRatio) * 220;
+      } else if (faceRatio > GUIDE.faceRatioMax) {
+        outOfRangePenalty = (faceRatio - GUIDE.faceRatioMax) * 160;
+      }
       const rollPenalty = Math.abs(metrics.roll || 0) * 0.4;
-      return sharpness - centerPenalty - ratioPenalty - rollPenalty;
+      return sharpness + faceRatioBonus - preferredPenalty - outOfRangePenalty - centerPenalty - rollPenalty;
     }
 
     function poseDistanceDeg(a, b) {
@@ -1839,18 +1983,24 @@
       };
     }
 
-    function setQuickDownloadButtons(objArtifact, texArtifact) {
+    function setQuickDownloadButtons(objArtifact, mtlArtifact, texArtifact) {
       resultQuickDownloadsEl.innerHTML = "";
-      const pushDownload = (label, artifact) => {
-        if (!artifact) return;
-        const a = document.createElement("a");
-        a.href = api(artifact.download_url);
-        a.textContent = label;
-        a.download = artifact.path.split("/").pop() || "";
-        resultQuickDownloadsEl.appendChild(a);
-      };
-      pushDownload("下载纹理OBJ", objArtifact);
-      pushDownload("下载纹理PNG", texArtifact);
+      if (!objArtifact && !mtlArtifact && !texArtifact) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "一键下载结果";
+      btn.addEventListener("click", () => {
+        const list = [objArtifact, mtlArtifact, texArtifact].filter(Boolean);
+        for (const artifact of list) {
+          const a = document.createElement("a");
+          a.href = api(artifact.download_url);
+          a.download = artifact.path.split("/").pop() || "";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+      });
+      resultQuickDownloadsEl.appendChild(btn);
     }
 
     async function loadResultViewerMesh(objUrl, texUrl) {
@@ -1879,9 +2029,11 @@
             (err) => reject(err || new Error("纹理加载失败"))
           );
         });
+        texture.flipY = false;
         if ("colorSpace" in texture && THREE_NS.SRGBColorSpace) {
           texture.colorSpace = THREE_NS.SRGBColorSpace;
         }
+        texture.needsUpdate = true;
       }
 
       const material = new THREE_NS.MeshStandardMaterial({
@@ -2352,6 +2504,7 @@
         yaw: yawDeg,
         pitch: pitchDeg,
         score,
+        faceRatio: Number(metrics.faceRatio || 0),
         poseYaw: metrics.yaw,
         posePitch: metrics.pitch,
         poseRoll: metrics.roll,
@@ -2528,6 +2681,7 @@
             yaw: shot.yaw,
             pitch: shot.pitch,
             score: Number(shot.score || 0),
+            face_ratio: Number(shot.faceRatio || 0),
             filename: shot.filename,
           });
         }
@@ -2600,26 +2754,24 @@
       if (!res.ok) return;
       const data = await res.json();
       const items = data.artifacts || [];
-      artifactsEl.innerHTML = "<h3 style='margin:4px 0 8px;'>结果文件</h3>";
-      for (const it of items) {
-        const a = document.createElement("a");
-        a.href = api(it.download_url);
-        a.textContent = `${it.path} (${it.size} bytes)`;
-        a.target = "_blank";
-        artifactsEl.appendChild(a);
-      }
+      artifactsEl.innerHTML = "";
 
       const objArtifact = pickArtifact(
         items,
         ["texture_dataset/final_textured.obj", "texture_dataset/final_hack.obj"],
         ".obj"
       );
+      const mtlArtifact = pickArtifact(
+        items,
+        ["texture_dataset/final_hack.mtl"],
+        ".mtl"
+      );
       const texArtifact = pickArtifact(
         items,
         ["texture_dataset/final_hack_texture.png"],
         ".png"
       );
-      setQuickDownloadButtons(objArtifact, texArtifact);
+      setQuickDownloadButtons(objArtifact, mtlArtifact, texArtifact);
 
       if (!objArtifact) {
         setResultViewerHint("未找到可预览的 OBJ 文件，请直接下载结果文件查看。");
@@ -2657,6 +2809,10 @@
     }
 
     openCamBtn.addEventListener("click", async () => {
+      if (!startupModeConfirmed) {
+        uploadStatus.textContent = "请先在弹窗中选择拍摄模式并确认";
+        return;
+      }
       try {
         syncCaptureModeFromInputs();
         updateCaptureModeDescription();
@@ -2719,14 +2875,35 @@
     });
 
     initGuideGrid();
-    syncCaptureModeFromInputs();
-    updateCaptureModeDescription();
+    setStartupCaptureLocked(true);
+    applyCaptureModeToInputs(DEFAULT_CAPTURE_MODE);
     resetCoverage();
     resetResultViewer();
     syncResultViewerSize();
     updateSwitchCamButtonText();
     clearOverlay();
     drawVirtualMesh();
+
+    if (startupModeListEl) {
+      startupModeListEl.addEventListener("click", (ev) => {
+        const button = ev.target.closest(".startup-mode-item");
+        if (!button) return;
+        setStartupSelectedMode(button.dataset.mode || DEFAULT_CAPTURE_MODE);
+      });
+    }
+    if (startupModeConfirmBtn) {
+      startupModeConfirmBtn.addEventListener("click", () => {
+        if (!startupModeSelected) return;
+        startupModeConfirmed = true;
+        applyCaptureModeToInputs(startupModeSelected);
+        setStartupCaptureLocked(false);
+        if (startupModeModalEl) {
+          startupModeModalEl.classList.add("hidden");
+        }
+        const info = getCaptureModeInfo();
+        setGuideMessage(`已选择模式：${info.label}。点击“打开摄像头”开始采集。`, "warn");
+      });
+    }
   </script>
 </body>
 </html>

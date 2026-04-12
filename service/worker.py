@@ -101,7 +101,7 @@ def run_pipeline_job(job_id: str) -> None:
         "--gpu",
         "auto",
         "--max_image_side",
-        "1280",
+        str(settings.pipeline_video_max_side),
     ]
     raw_frames_root = save_root / "raw_frames"
     if not _has_images(raw_frames_root):
