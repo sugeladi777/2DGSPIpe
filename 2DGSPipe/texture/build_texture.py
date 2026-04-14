@@ -16,6 +16,7 @@ parser.add_argument('--lpips_loss_weight', type=float, default=0.05)
 parser.add_argument('--lpips_start_iter', type=int, default=60)
 parser.add_argument('--lpips_downsample', type=int, default=512)
 parser.add_argument('--grad_use_view_weight', type=int, default=1)
+parser.add_argument('--face_uv_loss_weight', type=float, default=2.0)
 parser.add_argument('--recompute_loss_weight', action='store_true')
 parser.add_argument('--num_workers', type=int, default=8)
 parser.add_argument('--persistent_workers', type=int, default=1)
@@ -66,6 +67,16 @@ net_cfg = {
     "batch_size": 2097152,
     "residual_scale": 0.25,
 }
+
+# Must match the fixed atlas layout in uvexport/export_uv_blender.py.
+UV_PACK_MARGIN = 0.004
+FACE_ATLAS_U_SPLIT = 0.30
+FACE_UV_RECT = (
+    FACE_ATLAS_U_SPLIT + UV_PACK_MARGIN,
+    UV_PACK_MARGIN,
+    1.0 - UV_PACK_MARGIN,
+    1.0 - UV_PACK_MARGIN,
+)
 
 
 def compute_vertex_visibility_o3d(o3d_scene, point, uv_vertices):
@@ -338,11 +349,24 @@ class DiffusionSampler:
         denom = weight.sum().clamp_min(1e-6)
         return diff.sum() / denom
 
-    def masked_l1_loss(self, pred, target, mask):
-        mask = mask.expand_as(pred)
-        diff = torch.abs(pred - target) * mask
-        denom = mask.sum().clamp_min(1e-6)
-        return diff.sum() / denom
+    def face_uv_loss_weight(self, uv_img):
+        weight_value = max(1.0, float(opt.face_uv_loss_weight))
+        if weight_value <= 1.0:
+            return torch.ones_like(uv_img[:, :1])
+
+        u = (uv_img[:, 0:1] + 1.0) * 0.5
+        v = (1.0 - uv_img[:, 1:2]) * 0.5
+        face_mask = (
+            (u >= FACE_UV_RECT[0])
+            & (u <= FACE_UV_RECT[2])
+            & (v >= FACE_UV_RECT[1])
+            & (v <= FACE_UV_RECT[3])
+        )
+        return torch.where(
+            face_mask,
+            torch.full_like(u, weight_value),
+            torch.ones_like(u),
+        )
 
     def downsample_for_lpips(self, pred, target):
         max_side = opt.lpips_downsample
@@ -366,6 +390,7 @@ class DiffusionSampler:
         global_weight_sum = torch.zeros(1, dtype=torch.float32)
 
         view_weight_list = self.loss_weight_img.detach().cpu()
+        dropped_uv_samples = 0
         for img, mask, uv, view_weight in zip(
             train_data.images,
             train_data.masks,
@@ -388,6 +413,20 @@ class DiffusionSampler:
             colors = img.permute(1, 2, 0).reshape(-1, 3)[valid]
             uv_coord = uv.permute(1, 2, 0).reshape(-1, 2)[valid]
             pixel_weight = pixel_weight[valid]
+            in_uv_range = (
+                torch.isfinite(uv_coord).all(dim=1)
+                & (uv_coord[:, 0] >= -1.0)
+                & (uv_coord[:, 0] <= 1.0)
+                & (uv_coord[:, 1] >= -1.0)
+                & (uv_coord[:, 1] <= 1.0)
+            )
+            if not torch.all(in_uv_range):
+                dropped_uv_samples += int((~in_uv_range).sum().item())
+                colors = colors[in_uv_range]
+                uv_coord = uv_coord[in_uv_range]
+                pixel_weight = pixel_weight[in_uv_range]
+                if colors.numel() == 0:
+                    continue
 
             global_color_sum += torch.sum(colors * pixel_weight[:, None], dim=0)
             global_weight_sum += torch.sum(pixel_weight)
@@ -395,8 +434,8 @@ class DiffusionSampler:
             u = (uv_coord[:, 0] + 1.0) * 0.5 * (self.uv_reso_w - 1)
             v = (uv_coord[:, 1] + 1.0) * 0.5 * (self.uv_reso_h - 1)
 
-            x0 = torch.floor(u).long()
-            y0 = torch.floor(v).long()
+            x0 = torch.clamp(torch.floor(u).long(), min=0, max=self.uv_reso_w - 1)
+            y0 = torch.clamp(torch.floor(v).long(), min=0, max=self.uv_reso_h - 1)
             x1 = torch.clamp(x0 + 1, max=self.uv_reso_w - 1)
             y1 = torch.clamp(y0 + 1, max=self.uv_reso_h - 1)
 
@@ -433,6 +472,8 @@ class DiffusionSampler:
             "[Texture Init] covered_uv_texels=%d/%d (%.2f%%)"
             % (covered_texel, valid_uv_texel, coverage_ratio * 100.0)
         )
+        if dropped_uv_samples:
+            print(f"[Texture Init] dropped out-of-range uv samples: {dropped_uv_samples}")
         return init_texture
 
     def initialize_texture_map_from_views(self, train_data):
@@ -663,18 +704,22 @@ class DiffusionSampler:
 
                 mask = data["mask"]
                 gt = data["pixels"]
+                face_weight = self.face_uv_loss_weight(data["uv"])
 
                 img_pred = render * mask
                 img_gt = gt * mask
 
-                loss_rgb = self.masked_l1_loss(img_pred, img_gt, mask)
+                rgb_weight = mask * face_weight
+                loss_rgb = self.weighted_l1_loss(img_pred, img_gt, rgb_weight)
                 grad_gt = kornia.filters.spatial_gradient(img_gt)
                 grad_pred = kornia.filters.spatial_gradient(img_pred)
+                grad_face_weight = face_weight[:, :, None, ...]
                 if opt.grad_use_view_weight:
-                    grad_weight = weight_img[:, :, None, ...] * mask[:, :, None, ...]
+                    grad_weight = weight_img[:, :, None, ...] * mask[:, :, None, ...] * grad_face_weight
                     loss_grad = self.weighted_l1_loss(grad_pred, grad_gt, grad_weight)
                 else:
-                    loss_grad = self.masked_l1_loss(grad_pred, grad_gt, mask[:, :, None, ...])
+                    grad_weight = mask[:, :, None, ...] * grad_face_weight
+                    loss_grad = self.weighted_l1_loss(grad_pred, grad_gt, grad_weight)
                 
                 loss = opt.rgb_loss_weight * loss_rgb + opt.grad_loss_weight * loss_grad
                 loss_lpips = torch.zeros((), device=self.device)

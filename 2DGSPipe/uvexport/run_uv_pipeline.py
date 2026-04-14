@@ -194,6 +194,7 @@ def main() -> None:
             "--",
             input_mesh,
             uv_mesh,
+            data_root,
         ],
         cwd=code_root,
     )

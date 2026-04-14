@@ -242,6 +242,7 @@ def main() -> None:
     raw_frame_root = os.path.join(save_root, "raw_frames")
     mask_save_root = os.path.join(save_root, "wholebody_mask")
     face_mask_save_root = os.path.join(save_root, "face_mask")
+    face_mask_no_hair_save_root = os.path.join(save_root, "face_mask_no_hair")
     tex_data_root = os.path.join(save_root, "texture_dataset")
     _resize_raw_frames_max_side(raw_frame_root, int(opt.max_image_side), log_path)
 
@@ -266,6 +267,8 @@ def main() -> None:
                 raw_frame_root,
                 "--output_root",
                 face_mask_save_root,
+                "--output_root_no_hair",
+                face_mask_no_hair_save_root,
                 "--batch_size",
                 "12",
                 "--det_max_size",
